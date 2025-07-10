@@ -65,7 +65,6 @@ private:
     AVCodecContext *codecContext_;
     const AVCodec *codec_;
     AVFrame *frame_;
-    AVFrame *rgbFrame_;
     SwsContext *swsContext_;
     AVPacket *packet_;
 

@@ -184,22 +184,7 @@ struct Index {
               .margin({ bottom: 10 })
 
             Stack() {
-              // 视频渲染组件
-              // XComponent({
-              //   id: 'videoCanvas',
-              //   type: 'surface',
-              //   libraryname: 'entry'
-              // })
-              //   .width('100%')
-              //   .height(200)
-              //   .backgroundColor('#000000')
-              //   .borderRadius(8)
-              //   .onLoad((event) => {
-              //     this.addLog('视频画布加载完成');
-              //   })
-              //   .onDestroy(() => {
-              //     this.addLog('视频画布销毁');
-              //   })
+              // 视频渲染组件XComponent
 
               // 播放状态指示
               Column() {

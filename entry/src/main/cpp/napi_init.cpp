@@ -15,39 +15,6 @@
 // 全局视频流处理器映射
 static std::map<std::string, std::shared_ptr<VideoStreamHandler>> g_streamHandlers;
 
-// 帧数据回调到JS
-static napi_value CreateFrameData(napi_env env, const VideoFrame &frame) {
-    napi_value frameObj;
-    napi_create_object(env, &frameObj);
-
-    // 创建width属性
-    napi_value width;
-    napi_create_int32(env, frame.width, &width);
-    napi_set_named_property(env, frameObj, "width", width);
-
-    // 创建height属性
-    napi_value height;
-    napi_create_int32(env, frame.height, &height);
-    napi_set_named_property(env, frameObj, "height", height);
-
-    // 创建pts属性
-    napi_value pts;
-    napi_create_int64(env, frame.pts, &pts);
-    napi_set_named_property(env, frameObj, "pts", pts);
-
-    // 创建ArrayBuffer存储帧数据
-    void *buffer_data;
-    size_t buffer_size = frame.linesize * frame.height;
-    napi_value arrayBuffer;
-    napi_create_arraybuffer(env, buffer_size, &buffer_data, &arrayBuffer);
-
-    // 复制帧数据
-    memcpy(buffer_data, frame.data, buffer_size);
-    napi_set_named_property(env, frameObj, "data", arrayBuffer);
-
-    return frameObj;
-}
-
 // 开始视频流
 static napi_value StartVideoStream(napi_env env, napi_callback_info info) {
     OH_LOG_INFO(LOG_APP, "=== StartVideoStream called ===");
@@ -249,15 +216,6 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"getStreamStatus", nullptr, GetStreamStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getFrameStats", nullptr, GetFrameStats, nullptr, nullptr, nullptr, napi_default, nullptr}};
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
-
-    // 注册XComponent回调
-    napi_value exportInstance = nullptr;
-    OH_NativeXComponent *nativeXComponent = nullptr;
-    int32_t ret;
-    char idStr[OH_XCOMPONENT_ID_LEN_MAX + 1] = {};
-    uint64_t idSize = OH_XCOMPONENT_ID_LEN_MAX + 1;
-    
-
     return exports;
 }
 EXTERN_C_END

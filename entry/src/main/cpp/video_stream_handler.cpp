@@ -13,7 +13,7 @@ extern "C" bool RenderVideoFrame(const VideoFrame &frame);
 
 
 VideoStreamHandler::VideoStreamHandler()
-    : formatContext_(nullptr), codecContext_(nullptr), codec_(nullptr), frame_(nullptr), rgbFrame_(nullptr),
+    : formatContext_(nullptr), codecContext_(nullptr), codec_(nullptr), frame_(nullptr),
       swsContext_(nullptr), packet_(nullptr), videoStreamIndex_(-1), isStreaming_(false), shouldStop_(false),
       frameWidth_(0), frameHeight_(0), frameRate_(0.0), frameCount_(0), currentFrameRate_(0.0) {
     initializeFFmpeg();
@@ -93,6 +93,7 @@ std::string VideoStreamHandler::getStreamInfo() const {
 void VideoStreamHandler::streamThread() {
     OH_LOG_INFO(LOG_APP, "Stream thread started for URL: %{public}s", streamUrl_.c_str());
 
+    // 打开流
     if (!openInputStream(streamUrl_)) {
         OH_LOG_ERROR(LOG_APP, "Failed to open input stream: %{public}s", streamUrl_.c_str());
         std::lock_guard<std::mutex> lock(callbackMutex_);
@@ -104,6 +105,7 @@ void VideoStreamHandler::streamThread() {
 
     OH_LOG_INFO(LOG_APP, "Input stream opened successfully");
 
+    // 设置解码器
     if (!setupDecoder()) {
         OH_LOG_ERROR(LOG_APP, "Failed to setup decoder");
         std::lock_guard<std::mutex> lock(callbackMutex_);
@@ -118,34 +120,16 @@ void VideoStreamHandler::streamThread() {
 
     // 分配帧内存
     frame_ = av_frame_alloc();
-    rgbFrame_ = av_frame_alloc();
     packet_ = av_packet_alloc();
 
-    if (!frame_ || !rgbFrame_ || !packet_) {
+    if (!frame_ || !packet_) {
         std::lock_guard<std::mutex> lock(callbackMutex_);
         if (errorCallback_) {
             errorCallback_("Failed to allocate frame memory");
         }
         return;
     }
-
-    // 为RGB帧分配缓冲区
-    int numBytes = av_image_get_buffer_size(AV_PIX_FMT_RGB24, frameWidth_, frameHeight_, 1);
-    uint8_t *buffer = (uint8_t *)av_malloc(numBytes * sizeof(uint8_t));
-    av_image_fill_arrays(rgbFrame_->data, rgbFrame_->linesize, buffer, AV_PIX_FMT_RGB24, frameWidth_, frameHeight_, 1);
-
-    // 创建颜色空间转换上下文
-    swsContext_ = sws_getContext(frameWidth_, frameHeight_, codecContext_->pix_fmt, frameWidth_, frameHeight_,
-                                 AV_PIX_FMT_RGB24, SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-    if (!swsContext_) {
-        OH_LOG_ERROR(LOG_APP, "Failed to create color space conversion context");
-        av_free(buffer);
-        cleanup();
-        isStreaming_ = false;
-        return;
-    }
-
+    
     OH_LOG_INFO(LOG_APP, "Starting main decode loop...");
     int frameCount = 0;
 
@@ -185,8 +169,7 @@ void VideoStreamHandler::streamThread() {
 
     // 更新当前帧率
     currentFrameRate_ = frameRate_;
-
-    av_free(buffer);
+    
     cleanup();
     isStreaming_ = false;
 }
@@ -207,6 +190,7 @@ bool VideoStreamHandler::openInputStream(const std::string &url) {
     av_dict_set(&options, "user_agent", "FFmpeg/VideoStream", 0);
     av_dict_set(&options, "max_delay", "500000", 0); // 最大延迟500ms
 
+    // 打开流
     OH_LOG_INFO(LOG_APP, "Attempting to open input with avformat_open_input...");
     int ret = avformat_open_input(&formatContext_, url.c_str(), nullptr, &options);
     if (ret != 0) {
@@ -222,6 +206,7 @@ bool VideoStreamHandler::openInputStream(const std::string &url) {
     av_dict_free(&options);
     OH_LOG_INFO(LOG_APP, "avformat_open_input succeeded");
 
+    // 寻找流信息
     OH_LOG_INFO(LOG_APP, "Finding stream info...");
     ret = avformat_find_stream_info(formatContext_, nullptr);
     if (ret < 0) {
@@ -318,15 +303,10 @@ bool VideoStreamHandler::processFrame(AVFrame *frame) {
         return false;
     }
 
-    // 转换颜色空间
-    sws_scale(swsContext_, frame->data, frame->linesize, 0, frameHeight_, rgbFrame_->data, rgbFrame_->linesize);
-
     // 创建VideoFrame结构
     VideoFrame videoFrame;
-    videoFrame.data = rgbFrame_->data[0];
     videoFrame.width = frameWidth_;
     videoFrame.height = frameHeight_;
-    videoFrame.linesize = rgbFrame_->linesize[0];
     videoFrame.pts = frame->pts;
 
     // 调用回调函数
@@ -350,10 +330,6 @@ void VideoStreamHandler::cleanup() {
 
     if (frame_) {
         av_frame_free(&frame_);
-    }
-
-    if (rgbFrame_) {
-        av_frame_free(&rgbFrame_);
     }
 
     if (codecContext_) {
