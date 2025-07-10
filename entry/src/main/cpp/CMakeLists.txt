@@ -18,13 +18,13 @@ endif()
 include_directories(${NATIVERENDER_ROOT_PATH}
                     ${NATIVERENDER_ROOT_PATH}/include)
 
-# Add source files
-file(GLOB_RECURSE SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.c
-)
 
-add_library(entry SHARED ${SOURCES})
+add_library(entry SHARED
+    render/egl_core.cpp
+    render/plugin_render.cpp
+    manager/plugin_manager.cpp
+    napi_init.cpp
+)
 
 
 #将三方库的头文件加入工程中
@@ -45,3 +45,11 @@ target_link_libraries(entry PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/thirdparty/rtmpd
 
 target_link_libraries(entry PUBLIC libace_napi.z.so)
 target_link_libraries(entry PRIVATE hilog_ndk.z)
+
+# EGL xcomponent库
+target_link_libraries(entry PUBLIC EGL)
+target_link_libraries(entry PUBLIC GLESv3)
+target_link_libraries(entry PUBLIC ace_ndk.z)
+target_link_libraries(entry PUBLIC uv)
+target_link_libraries(entry PUBLIC libnative_window.so)
+

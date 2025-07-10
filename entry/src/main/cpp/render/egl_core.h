@@ -7,4 +7,44 @@
 #ifndef ARKUI_DEMO_EGL_CORE_H
 #define ARKUI_DEMO_EGL_CORE_H
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES3/gl3.h>
+
+class EGLCore {
+public:
+    explicit EGLCore() {};
+    ~EGLCore() {}
+    bool EglContextInit(void* window);
+    bool CreateEnvironment();
+    void Draw(int& hasDraw);
+    void Background();
+    void ChangeColor(int& hasChangeColor);
+    void Release();
+    void UpdateSize(int width, int height);
+
+private:
+    GLuint LoadShader(GLenum type, const char* shaderSrc);
+    GLuint CreateProgram(const char* vertexShader, const char* fragShader);
+    GLint PrepareDraw();
+    bool ExecuteDraw(GLint position, const GLfloat* color, const GLfloat shapeVertices[], unsigned long vertSize);
+    bool ExecuteDrawStar(GLint position, const GLfloat* color, const GLfloat shapeVertices[], unsigned long vertSize);
+    bool ExecuteDrawNewStar(GLint position, const GLfloat* color,
+                            const GLfloat shapeVertices[], unsigned long vertSize);
+    void Rotate2d(GLfloat centerX, GLfloat centerY, GLfloat* rotateX, GLfloat* rotateY, GLfloat theta);
+    bool FinishDraw();
+
+private:
+    EGLNativeWindowType eglWindow_;
+    EGLDisplay eglDisplay_ = EGL_NO_DISPLAY;
+    EGLConfig eglConfig_ = EGL_NO_CONFIG_KHR;
+    EGLSurface eglSurface_ = EGL_NO_SURFACE;
+    EGLContext eglContext_ = EGL_NO_CONTEXT;
+    GLuint program_;
+    bool flag_ = false;
+    int width_;
+    int height_;
+    GLfloat widthPercent_;
+};
+
 #endif //ARKUI_DEMO_EGL_CORE_H

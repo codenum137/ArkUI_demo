@@ -10,6 +10,21 @@ interface StreamInfo {
   info: string;
 }
 
+class MyXComponentController extends XComponentController{
+  onSurfaceCreated(surfaceId: string): void {
+    console.log(`onSurfaceCreated surfaceId: ${surfaceId}`);
+    videoStreamNapi.SetSurfaceId(BigInt(surfaceId));
+  }
+  onSurfaceChanged(surfaceId: string, rect: SurfaceRect): void {
+    console.log(`onSurfaceChanged surfaceId: ${surfaceId}, rect: ${JSON.stringify(rect)}}`);
+    videoStreamNapi.ChangeSurface(BigInt(surfaceId), rect.surfaceWidth, rect.surfaceHeight);
+  }
+  onSurfaceDestroyed(surfaceId: string): void {
+    console.log(`onSurfaceDestroyed surfaceId: ${surfaceId}`);
+    videoStreamNapi.DestroySurface(BigInt(surfaceId));
+  }
+}
+
 @Entry
 @Component
 struct Index {
@@ -19,6 +34,7 @@ struct Index {
   @State logs: string[] = [];
   @State frameCount: number = 0;
   @State frameRate: number = 0;
+  xComponentController: XComponentController = new MyXComponentController();
 
   addLog(message: string): void {
     const timestamp = new Date().toLocaleTimeString();
@@ -185,6 +201,13 @@ struct Index {
 
             Stack() {
               // 视频渲染组件XComponent
+              XComponent({
+                type: XComponentType.SURFACE,
+                controller: this.xComponentController
+              })
+                .onLoad(
+                  let surfaceId = this.xComponentController.getXComponentSurfaceId();
+                )
 
               // 播放状态指示
               Column() {

@@ -6,6 +6,8 @@
 #include <map>
 #include <memory>
 #include <string>
+#include "common/common.h"
+#include "manager/plugin_manager.h"
 
 #undef LOG_DOMAIN
 #undef LOG_TAG
@@ -214,7 +216,18 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"startVideoStream", nullptr, StartVideoStream, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"stopVideoStream", nullptr, StopVideoStream, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getStreamStatus", nullptr, GetStreamStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"getFrameStats", nullptr, GetFrameStats, nullptr, nullptr, nullptr, napi_default, nullptr}};
+        {"getFrameStats", nullptr, GetFrameStats, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"SetSurfaceId", nullptr, PluginManager::SetSurfaceId,
+            nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"ChangeSurface", nullptr, PluginManager::ChangeSurface,
+            nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"GetXComponentStatus", nullptr, PluginManager::GetXComponentStatus,
+            nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"DrawPattern", nullptr, PluginManager::DrawPattern,
+            nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"DestroySurface", nullptr, PluginManager::DestroySurface,
+            nullptr, nullptr, nullptr, napi_default, nullptr}
+    };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
 }
