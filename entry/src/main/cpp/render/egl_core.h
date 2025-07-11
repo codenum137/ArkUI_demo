@@ -17,11 +17,12 @@ class EGLCore {
 public:
     explicit EGLCore()
         : yTexture_(0), uTexture_(0), vTexture_(0), VAO_(0), VBO_(0), EBO_(0), texturesInitialized_(false), width_(0),
-          height_(0) {};
+          height_(0), program_(0) {};
     ~EGLCore() {}
     bool EglContextInit(void *window);
     bool CreateEnvironment();
     bool RenderYUVFrame(const VideoFrame &frame);
+    bool RenderSingleTestFrame(float r = 0.2f, float g = 0.6f, float b = 0.9f, float a = 1.0f);
     void Release();
     void UpdateSize(int width, int height);
 

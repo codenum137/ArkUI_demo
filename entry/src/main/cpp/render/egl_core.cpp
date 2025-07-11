@@ -309,7 +309,7 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
 
     // Clear and prepare for rendering
     glViewport(DEFAULT_X_POSITION, DEFAULT_Y_POSITION, width_, height_);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
 
     // Use shader program
@@ -334,7 +334,7 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
     // 检查OpenGL错误
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error before swap: %d", error);
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error before swap: %{public}d", error);
         return false;
     }
 
@@ -430,7 +430,8 @@ bool EGLCore::UpdateYUVTextures(const VideoFrame &frame) {
     // 检查OpenGL错误
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error in UpdateYUVTextures: %d", error);
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error in UpdateYUVTextures: %{public}d",
+                     error);
         return false;
     }
 
@@ -446,7 +447,7 @@ void EGLCore::DrawQuad() {
     // 检查绘制错误
     GLenum error = glGetError();
     if (error != GL_NO_ERROR) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error in DrawQuad: %d", error);
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error in DrawQuad: %{public}d", error);
     }
 }
 
@@ -555,6 +556,12 @@ void EGLCore::UpdateSize(int width, int height) {
 }
 
 void EGLCore::Release() {
+    // Cleanup programs
+    if (program_ != 0) {
+        glDeleteProgram(program_);
+        program_ = 0;
+    }
+
     // Cleanup textures and buffers
     if (texturesInitialized_) {
         glDeleteTextures(1, &yTexture_);
@@ -577,5 +584,42 @@ void EGLCore::Release() {
     if ((eglDisplay_ == nullptr) || (!eglTerminate(eglDisplay_))) {
         OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Release eglTerminate failed");
     }
+}
+
+bool EGLCore::RenderSingleTestFrame(float r, float g, float b, float a) {
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", 
+                 "RenderSingleTestFrame: clearing with color (%.2f, %.2f, %.2f, %.2f)", r, g, b, a);
+    
+    // 检查EGL环境是否初始化
+    if (eglDisplay_ == EGL_NO_DISPLAY || eglContext_ == EGL_NO_CONTEXT || eglSurface_ == EGL_NO_SURFACE) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", 
+                     "RenderSingleTestFrame: EGL environment not initialized");
+        return false;
+    }
+    
+    // 设置当前上下文
+    if (!eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", 
+                     "RenderSingleTestFrame: eglMakeCurrent failed");
+        return false;
+    }
+    
+    // 设置视口
+    glViewport(0, 0, width_, height_);
+    
+    // 设置清除颜色并清除缓冲区
+    glClearColor(r, g, b, a);
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    // 交换缓冲区显示内容
+    if (!eglSwapBuffers(eglDisplay_, eglSurface_)) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", 
+                     "RenderSingleTestFrame: eglSwapBuffers failed");
+        return false;
+    }
+    
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", 
+                 "RenderSingleTestFrame: Test frame rendered successfully");
+    return true;
 }
 } // namespace VideoStreamNS

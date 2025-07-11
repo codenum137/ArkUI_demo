@@ -147,6 +147,22 @@ struct Index {
     }
   }
 
+  renderTestFrame(r: number, g: number, b: number, a: number): void {
+    if (!this.surfaceId) {
+      this.addLog('Surface未准备好，无法渲染测试帧');
+      return;
+    }
+
+    this.addLog(`渲染测试帧: 颜色(${r}, ${g}, ${b}, ${a})`);
+
+    try {
+      const result = videoStreamNapi.renderSingleTestFrame(BigInt(this.surfaceId), r, g, b, a);
+      this.addLog(`测试帧渲染结果: ${result ? '成功' : '失败'}`);
+    } catch (error) {
+      this.addLog(`渲染测试帧异常: ${error}`);
+    }
+  }
+
   build() {
     Column() {
       // 标题
@@ -220,6 +236,51 @@ struct Index {
           .width('100%')
           .justifyContent(FlexAlign.SpaceBetween)
           .padding({ left: 15, right: 15 })
+          .margin({ bottom: 15 })
+
+          // 测试按钮区域
+          Column() {
+            Text('渲染测试')
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .alignSelf(ItemAlign.Start)
+              .margin({ bottom: 10 })
+
+            Row() {
+              Button('蓝色测试帧')
+                .width('30%')
+                .height(35)
+                .fontSize(14)
+                .backgroundColor('#3b82f6')
+                .fontColor(Color.White)
+                .enabled(!!this.surfaceId)
+                .onClick(() => this.renderTestFrame(0.2, 0.6, 0.9, 1.0))
+
+              Button('红色测试帧')
+                .width('30%')
+                .height(35)
+                .fontSize(14)
+                .backgroundColor('#ef4444')
+                .fontColor(Color.White)
+                .enabled(!!this.surfaceId)
+                .onClick(() => this.renderTestFrame(0.9, 0.2, 0.2, 1.0))
+
+              Button('绿色测试帧')
+                .width('30%')
+                .height(35)
+                .fontSize(14)
+                .backgroundColor('#10b981')
+                .fontColor(Color.White)
+                .enabled(!!this.surfaceId)
+                .onClick(() => this.renderTestFrame(0.2, 0.9, 0.2, 1.0))
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.SpaceBetween)
+          }
+          .width('100%')
+          .padding(15)
+          .backgroundColor(Color.White)
+          .borderRadius(10)
           .margin({ bottom: 15 })
 
           // 视频显示区域
