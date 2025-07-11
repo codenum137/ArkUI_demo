@@ -4,18 +4,19 @@
 // Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
 // please include "napi/native_api.h".
 
-#ifndef ARKUI_DEMO_PLUGIN_RENDER_H
-#define ARKUI_DEMO_PLUGIN_RENDER_H
+#ifndef ARKUI_DEMO_VIDEO_RENDERER_H
+#define ARKUI_DEMO_VIDEO_RENDERER_H
 
+#include "../video_stream_handler.h"
+#include "egl_core.h"
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <native_window/external_window.h>
-#include "egl_core.h"
 
-class PluginRender {
+namespace VideoStreamNS {
+class VideoRenderer {
 public:
-    explicit PluginRender(int64_t& id);
-    ~PluginRender()
-    {
+    explicit VideoRenderer(int64_t surfaceId);
+    ~VideoRenderer() {
         if (eglCore_ != nullptr) {
             eglCore_->Release();
             delete eglCore_;
@@ -23,17 +24,16 @@ public:
         }
     }
 
-    void DrawPattern();
-    int32_t HasDraw();
-    int32_t HasChangedColor();
-    void InitNativeWindow(OHNativeWindow* window);
-    void UpdateNativeWindowSize(int width, int height);
+    bool RenderYUVFrame(const VideoFrame &frame);
+    bool IsInitialized() const;
+    void InitNativeWindow(OHNativeWindow *window);
+    void UpdateSize(int width, int height);
+
 private:
-    EGLCore* eglCore_;
-    int64_t id_;
-    int32_t hasDraw_;
-    int32_t hasChangeColor_;
+    EGLCore *eglCore_;
+    int64_t surfaceId_;
+    bool isInitialized_;
 };
+} // namespace VideoStreamNS
 
-#endif //ARKUI_DEMO_PLUGIN_RENDER_H
-
+#endif // ARKUI_DEMO_VIDEO_RENDERER_H

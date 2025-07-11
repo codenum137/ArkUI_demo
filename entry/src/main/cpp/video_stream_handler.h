@@ -13,14 +13,13 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
-#include <libswscale/swscale.h>
 }
 
 struct VideoFrame {
-    uint8_t *data;
+    uint8_t *data[3]; // Y, U, V平面数据指针
+    int linesize[3];  // Y, U, V平面的行大小
     int width;
     int height;
-    int linesize;
     int64_t pts;
 };
 
@@ -65,7 +64,6 @@ private:
     AVCodecContext *codecContext_;
     const AVCodec *codec_;
     AVFrame *frame_;
-    SwsContext *swsContext_;
     AVPacket *packet_;
 
     int videoStreamIndex_;

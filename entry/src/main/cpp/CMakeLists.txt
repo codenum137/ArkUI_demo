@@ -8,7 +8,15 @@ set(NATIVERENDER_ROOT_PATH ${CMAKE_CURRENT_SOURCE_DIR})
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-int-conversion -Wl,-Bsymbolic")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-int-conversion -Wl,-Bsymbolic")
 
+# 强制定义HarmonyOS平台宏，确保EGL使用正确的平台类型
+add_compile_definitions(__OHOS__)
+add_compile_definitions(OHOS_PLATFORM)
+add_compile_definitions(EGL_EGLEXT_PROTOTYPES)
+add_compile_definitions(GL_GLEXT_PROTOTYPES)
 
+# 确保EGL平台识别 - 关键是OHOS_PLATFORM定义
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__OHOS__ -DOHOS_PLATFORM -DEGL_EGLEXT_PROTOTYPES")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__OHOS__ -DOHOS_PLATFORM -DEGL_EGLEXT_PROTOTYPES")
 
 if(DEFINED PACKAGE_FIND_FILE)
     include(${PACKAGE_FIND_FILE})
@@ -23,6 +31,7 @@ add_library(entry SHARED
     render/egl_core.cpp
     render/plugin_render.cpp
     manager/plugin_manager.cpp
+    video_stream_handler.cpp
     napi_init.cpp
 )
 
@@ -47,9 +56,54 @@ target_link_libraries(entry PUBLIC libace_napi.z.so)
 target_link_libraries(entry PRIVATE hilog_ndk.z)
 
 # EGL xcomponent库
-target_link_libraries(entry PUBLIC EGL)
-target_link_libraries(entry PUBLIC GLESv3)
-target_link_libraries(entry PUBLIC ace_ndk.z)
-target_link_libraries(entry PUBLIC uv)
-target_link_libraries(entry PUBLIC libnative_window.so)
+find_library(
+    # Sets the name of the path variable.
+    EGL-lib
+    # Specifies the name of the NDK library that
+    # you want CMake to locate.
+    EGL
+)
+
+find_library(
+    # Sets the name of the path variable.
+    GLES-lib
+    # Specifies the name of the NDK library that
+    # you want CMake to locate.
+    GLESv3
+)
+
+find_library(
+    # Sets the name of the path variable.
+    hilog-lib
+    # Specifies the name of the NDK library that
+    # you want CMake to locate.
+    hilog_ndk.z
+)
+
+find_library(
+    # Sets the name of the path variable.
+    libace-lib
+    # Specifies the name of the NDK library that
+    # you want CMake to locate.
+    ace_ndk.z
+)
+
+find_library(
+    # Sets the name of the path variable.
+    libnapi-lib
+    # Specifies the name of the NDK library that
+    # you want CMake to locate.
+    ace_napi.z
+)
+
+find_library(
+    # Sets the name of the path variable.
+    libuv-lib
+    # Specifies the name of the NDK library that
+    # you want CMake to locate.
+    uv
+)
+
+target_link_libraries(entry PUBLIC
+    ${EGL-lib} ${GLES-lib} ${hilog-lib} ${libace-lib} ${libnapi-lib} ${libuv-lib} libnative_window.so)
 

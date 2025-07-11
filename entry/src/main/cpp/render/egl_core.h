@@ -7,32 +7,30 @@
 #ifndef ARKUI_DEMO_EGL_CORE_H
 #define ARKUI_DEMO_EGL_CORE_H
 
+#include "../video_stream_handler.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 
+namespace VideoStreamNS {
 class EGLCore {
 public:
-    explicit EGLCore() {};
+    explicit EGLCore()
+        : yTexture_(0), uTexture_(0), vTexture_(0), VAO_(0), VBO_(0), EBO_(0), texturesInitialized_(false), width_(0),
+          height_(0) {};
     ~EGLCore() {}
-    bool EglContextInit(void* window);
+    bool EglContextInit(void *window);
     bool CreateEnvironment();
-    void Draw(int& hasDraw);
-    void Background();
-    void ChangeColor(int& hasChangeColor);
+    bool RenderYUVFrame(const VideoFrame &frame);
     void Release();
     void UpdateSize(int width, int height);
 
 private:
-    GLuint LoadShader(GLenum type, const char* shaderSrc);
-    GLuint CreateProgram(const char* vertexShader, const char* fragShader);
-    GLint PrepareDraw();
-    bool ExecuteDraw(GLint position, const GLfloat* color, const GLfloat shapeVertices[], unsigned long vertSize);
-    bool ExecuteDrawStar(GLint position, const GLfloat* color, const GLfloat shapeVertices[], unsigned long vertSize);
-    bool ExecuteDrawNewStar(GLint position, const GLfloat* color,
-                            const GLfloat shapeVertices[], unsigned long vertSize);
-    void Rotate2d(GLfloat centerX, GLfloat centerY, GLfloat* rotateX, GLfloat* rotateY, GLfloat theta);
-    bool FinishDraw();
+    GLuint LoadShader(GLenum type, const char *shaderSrc);
+    GLuint CreateProgram(const char *vertexShader, const char *fragShader);
+    bool InitYUVTextures();
+    bool UpdateYUVTextures(const VideoFrame &frame);
+    void DrawQuad();
 
 private:
     EGLNativeWindowType eglWindow_;
@@ -41,10 +39,21 @@ private:
     EGLSurface eglSurface_ = EGL_NO_SURFACE;
     EGLContext eglContext_ = EGL_NO_CONTEXT;
     GLuint program_;
-    bool flag_ = false;
     int width_;
     int height_;
-    GLfloat widthPercent_;
-};
 
-#endif //ARKUI_DEMO_EGL_CORE_H
+    // YUV纹理相关
+    GLuint yTexture_;
+    GLuint uTexture_;
+    GLuint vTexture_;
+    GLuint VAO_;
+    GLuint VBO_;
+    GLuint EBO_;
+    GLint yTextureLocation_;
+    GLint uTextureLocation_;
+    GLint vTextureLocation_;
+    bool texturesInitialized_;
+};
+} // namespace VideoStreamNS
+
+#endif // ARKUI_DEMO_EGL_CORE_H

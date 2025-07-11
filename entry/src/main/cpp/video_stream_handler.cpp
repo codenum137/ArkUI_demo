@@ -8,14 +8,11 @@
 #define LOG_DOMAIN 0x3200
 #define LOG_TAG "VideoStreamHandler"
 
-// 外部渲染函数声明
-extern "C" bool RenderVideoFrame(const VideoFrame &frame);
-
 
 VideoStreamHandler::VideoStreamHandler()
-    : formatContext_(nullptr), codecContext_(nullptr), codec_(nullptr), frame_(nullptr),
-      swsContext_(nullptr), packet_(nullptr), videoStreamIndex_(-1), isStreaming_(false), shouldStop_(false),
-      frameWidth_(0), frameHeight_(0), frameRate_(0.0), frameCount_(0), currentFrameRate_(0.0) {
+    : formatContext_(nullptr), codecContext_(nullptr), codec_(nullptr), frame_(nullptr), packet_(nullptr),
+      videoStreamIndex_(-1), isStreaming_(false), shouldStop_(false), frameWidth_(0), frameHeight_(0), frameRate_(0.0),
+      frameCount_(0), currentFrameRate_(0.0) {
     initializeFFmpeg();
 }
 
@@ -33,6 +30,7 @@ bool VideoStreamHandler::initializeFFmpeg() {
 void VideoStreamHandler::setFrameCallback(FrameCallback callback) {
     std::lock_guard<std::mutex> lock(callbackMutex_);
     frameCallback_ = callback;
+    OH_LOG_INFO(LOG_APP, "Frame callback set successfully");
 }
 
 void VideoStreamHandler::setErrorCallback(ErrorCallback callback) {
@@ -103,8 +101,6 @@ void VideoStreamHandler::streamThread() {
         return;
     }
 
-    OH_LOG_INFO(LOG_APP, "Input stream opened successfully");
-
     // 设置解码器
     if (!setupDecoder()) {
         OH_LOG_ERROR(LOG_APP, "Failed to setup decoder");
@@ -129,7 +125,7 @@ void VideoStreamHandler::streamThread() {
         }
         return;
     }
-    
+
     OH_LOG_INFO(LOG_APP, "Starting main decode loop...");
     int frameCount = 0;
 
@@ -169,7 +165,7 @@ void VideoStreamHandler::streamThread() {
 
     // 更新当前帧率
     currentFrameRate_ = frameRate_;
-    
+
     cleanup();
     isStreaming_ = false;
 }
@@ -244,8 +240,17 @@ bool VideoStreamHandler::setupDecoder() {
     OH_LOG_INFO(LOG_APP, "Setting up decoder for video stream %{public}d", videoStreamIndex_);
 
     AVCodecParameters *codecpar = formatContext_->streams[videoStreamIndex_]->codecpar;
+
+    // 详细的编解码器信息日志
     OH_LOG_INFO(LOG_APP, "Codec ID: %{public}d, width: %{public}d, height: %{public}d", codecpar->codec_id,
                 codecpar->width, codecpar->height);
+    OH_LOG_INFO(LOG_APP, "Pixel format: %{public}d, bit rate: %{public}ld, sample aspect ratio: %{public}d/%{public}d",
+                codecpar->format, codecpar->bit_rate, codecpar->sample_aspect_ratio.num,
+                codecpar->sample_aspect_ratio.den);
+
+    // 输出像素格式名称
+    const char *pix_fmt_name = av_get_pix_fmt_name((enum AVPixelFormat)codecpar->format);
+    OH_LOG_INFO(LOG_APP, "Pixel format name: %{public}s", pix_fmt_name ? pix_fmt_name : "unknown");
 
     // 查找解码器
     codec_ = avcodec_find_decoder(codecpar->codec_id);
@@ -285,6 +290,16 @@ bool VideoStreamHandler::setupDecoder() {
     frameHeight_ = codecContext_->height;
     OH_LOG_INFO(LOG_APP, "Decoder opened successfully, frame size: %{public}dx%{public}d", frameWidth_, frameHeight_);
 
+    // 输出解码器像素格式信息
+    const char *decoder_pix_fmt_name = av_get_pix_fmt_name(codecContext_->pix_fmt);
+    OH_LOG_INFO(LOG_APP, "Decoder pixel format: %{public}d (%{public}s)", codecContext_->pix_fmt,
+                decoder_pix_fmt_name ? decoder_pix_fmt_name : "unknown");
+
+    // 检查是否为YUV420P
+    if (codecContext_->pix_fmt != AV_PIX_FMT_YUV420P) {
+        OH_LOG_WARN(LOG_APP, "Warning: Decoder output format is not YUV420P, may need conversion");
+    }
+
     // 计算帧率
     AVRational timeBase = formatContext_->streams[videoStreamIndex_]->time_base;
     AVRational frameRate = formatContext_->streams[videoStreamIndex_]->r_frame_rate;
@@ -299,9 +314,30 @@ bool VideoStreamHandler::setupDecoder() {
 }
 
 bool VideoStreamHandler::processFrame(AVFrame *frame) {
-    if (!swsContext_) {
+    // 详细的帧信息诊断
+    const char *frame_pix_fmt_name = av_get_pix_fmt_name((enum AVPixelFormat)frame->format);
+    OH_LOG_INFO(LOG_APP, "Frame format: %{public}d (%{public}s), key_frame: %{public}d, pict_type: %{public}d",
+                frame->format, frame_pix_fmt_name ? frame_pix_fmt_name : "unknown", frame->key_frame, frame->pict_type);
+
+    // 检查帧数据有效性
+    if (!frame->data[0] || !frame->data[1] || !frame->data[2]) {
+        OH_LOG_ERROR(LOG_APP, "Frame data is NULL! Y=%{public}p, U=%{public}p, V=%{public}p", frame->data[0],
+                     frame->data[1], frame->data[2]);
         return false;
     }
+
+    // // 检查行大小
+    // OH_LOG_INFO(LOG_APP, "Frame linesize: Y=%{public}d, U=%{public}d, V=%{public}d", frame->linesize[0],
+    //             frame->linesize[1], frame->linesize[2]);
+
+    // // 验证第一个像素的数据（调试用）
+    // if (frame->data[0]) {
+    //     uint8_t y_sample = frame->data[0][0];
+    //     uint8_t u_sample = frame->data[1] ? frame->data[1][0] : 0;
+    //     uint8_t v_sample = frame->data[2] ? frame->data[2][0] : 0;
+    //     OH_LOG_INFO(LOG_APP, "First pixel YUV values: Y=%{public}d, U=%{public}d, V=%{public}d", y_sample, u_sample,
+    //                 v_sample);
+    // }
 
     // 创建VideoFrame结构
     VideoFrame videoFrame;
@@ -309,21 +345,29 @@ bool VideoStreamHandler::processFrame(AVFrame *frame) {
     videoFrame.height = frameHeight_;
     videoFrame.pts = frame->pts;
 
+    // 设置YUV平面数据
+    videoFrame.data[0] = frame->data[0];         // Y平面
+    videoFrame.data[1] = frame->data[1];         // U平面
+    videoFrame.data[2] = frame->data[2];         // V平面
+    videoFrame.linesize[0] = frame->linesize[0]; // Y平面行大小
+    videoFrame.linesize[1] = frame->linesize[1]; // U平面行大小
+    videoFrame.linesize[2] = frame->linesize[2]; // V平面行大小
+
+    // OH_LOG_INFO(LOG_APP, "VideoFrame created: %{public}dx%{public}d, pts=%{public}ld, Y_linesize=%{public}d",
+    //             videoFrame.width, videoFrame.height, static_cast<long>(videoFrame.pts), videoFrame.linesize[0]);
+
     // 调用回调函数
     std::lock_guard<std::mutex> lock(callbackMutex_);
     if (frameCallback_) {
         frameCallback_(videoFrame);
+    } else {
+        OH_LOG_ERROR(LOG_APP, "No frame callback set!");
     }
 
     return true;
 }
 
 void VideoStreamHandler::cleanup() {
-    if (swsContext_) {
-        sws_freeContext(swsContext_);
-        swsContext_ = nullptr;
-    }
-
     if (packet_) {
         av_packet_free(&packet_);
     }

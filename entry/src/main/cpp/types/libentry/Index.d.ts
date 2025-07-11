@@ -30,13 +30,13 @@ type XComponentContextStatus = {
   hasChangeColor: boolean,
 };
 
-export const startVideoStream: (url: string) => VideoStreamResult;
+export const startVideoStream: (url: string, surfaceId: bigint) => VideoStreamResult;
 export const stopVideoStream: (url: string) => boolean;
 export const getStreamStatus: (url: string) => StreamStatus;
 export const getFrameStats: (url: string) => FrameStats;
+export const updateVideoSurfaceSize: (surfaceId: bigint, width: number, height: number) => boolean;
 
-export const SetSurfaceId: (id: BigInt) => any;
-export const ChangeSurface: (id: BigInt, w: number, h: number) =>any;
-export const DrawPattern: (id: BigInt) => any;
-export const GetXComponentStatus: (id: BigInt) => XComponentContextStatus
-export const DestroySurface: (id: BigInt) => any;
+export const setSurfaceId: (id: bigint) => any;
+export const changeSurface: (id: bigint, w: number, h: number) => any;
+export const getXComponentStatus: (id: bigint) => XComponentContextStatus;
+export const destroySurface: (id: bigint) => any;

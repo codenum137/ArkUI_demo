@@ -1,13 +1,14 @@
+#include "common/common.h"
 #include "hilog/log.h" // 添加日志头文件
+#include "manager/plugin_manager.h"
 #include "napi/native_api.h"
+#include "render/plugin_render.h" // 需要VideoRenderer的完整定义
 #include "video_stream_handler.h"
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <cstring> // 添加memset支持
 #include <map>
 #include <memory>
 #include <string>
-#include "common/common.h"
-#include "manager/plugin_manager.h"
 
 #undef LOG_DOMAIN
 #undef LOG_TAG
@@ -21,15 +22,15 @@ static std::map<std::string, std::shared_ptr<VideoStreamHandler>> g_streamHandle
 static napi_value StartVideoStream(napi_env env, napi_callback_info info) {
     OH_LOG_INFO(LOG_APP, "=== StartVideoStream called ===");
 
-    size_t argc = 1;
-    napi_value args[1];
+    size_t argc = 2;
+    napi_value args[2];
 
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     OH_LOG_INFO(LOG_APP, "Got callback info, argc = %{public}zu", argc);
 
-    if (argc < 1) {
-        OH_LOG_ERROR(LOG_APP, "Missing stream URL parameter");
-        napi_throw_error(env, nullptr, "Missing stream URL parameter");
+    if (argc < 2) {
+        OH_LOG_ERROR(LOG_APP, "Missing parameters: expected URL and surfaceId");
+        napi_throw_error(env, nullptr, "Expected 2 arguments: url and surfaceId");
         return nullptr;
     }
 
@@ -42,19 +43,38 @@ static napi_value StartVideoStream(napi_env env, napi_callback_info info) {
     napi_get_value_string_utf8(env, args[0], &url[0], url_length + 1, &url_length);
     OH_LOG_INFO(LOG_APP, "Starting video stream with URL: %{public}s", url.c_str());
 
+    // 获取surfaceId参数
+    int64_t surfaceId = 0;
+    bool lossless = true;
+    if (napi_ok != napi_get_value_bigint_int64(env, args[1], &surfaceId, &lossless)) {
+        napi_throw_error(env, nullptr, "Failed to get surfaceId");
+        return nullptr;
+    }
+
+    OH_LOG_INFO(LOG_APP, "StartVideoStream: surfaceId=%{public}lld", static_cast<long long>(surfaceId));
+
+    // 获取视频渲染器
+    auto videoRenderer = PluginManager::GetVideoRenderer(surfaceId);
+    if (!videoRenderer) {
+        OH_LOG_ERROR(LOG_APP, "VideoRenderer not found for surfaceId: %{public}lld", static_cast<long long>(surfaceId));
+        napi_throw_error(env, nullptr, "VideoRenderer not found. Call setSurfaceId first.");
+        return nullptr;
+    }
+
     // 创建视频流处理器
     OH_LOG_INFO(LOG_APP, "Creating VideoStreamHandler...");
     auto handler = std::make_shared<VideoStreamHandler>();
-    OH_LOG_INFO(LOG_APP, "VideoStreamHandler created successfully");
-
-    // 设置回调函数
-    handler->setFrameCallback([env](const VideoFrame &frame) {
+    OH_LOG_INFO(LOG_APP, "VideoStreamHandler created successfully"); // 设置帧回调，直接连接到视频渲染器
+    handler->setFrameCallback([videoRenderer](const VideoFrame &frame) {
         OH_LOG_INFO(LOG_APP, "Frame received: %{public}dx%{public}d, pts=%{public}ld", frame.width, frame.height,
                     static_cast<long>(frame.pts));
+        if (!videoRenderer->RenderYUVFrame(frame)) {
+            OH_LOG_ERROR(LOG_APP, "Failed to render YUV frame");
+        }
     });
 
     handler->setErrorCallback(
-        [env](const std::string &error) { OH_LOG_ERROR(LOG_APP, "Stream error: %{public}s", error.c_str()); });
+        [](const std::string &error) { OH_LOG_ERROR(LOG_APP, "Stream error: %{public}s", error.c_str()); });
 
     OH_LOG_INFO(LOG_APP, "Callbacks set, starting stream...");
 
@@ -65,6 +85,7 @@ static napi_value StartVideoStream(napi_env env, napi_callback_info info) {
     if (success) {
         g_streamHandlers[url] = handler;
         OH_LOG_INFO(LOG_APP, "Added handler to global map, total handlers: %{public}zu", g_streamHandlers.size());
+        OH_LOG_INFO(LOG_APP, "Video stream connected to renderer successfully");
     } else {
         OH_LOG_ERROR(LOG_APP, "Failed to start stream for URL: %{public}s", url.c_str());
     }
@@ -136,20 +157,28 @@ static napi_value GetStreamStatus(napi_env env, napi_callback_info info) {
     std::string url(url_length, '\0');
     napi_get_value_string_utf8(env, args[0], &url[0], url_length + 1, &url_length);
 
+    OH_LOG_INFO(LOG_APP, "GetStreamStatus called for URL: %{public}s", url.c_str());
+    OH_LOG_INFO(LOG_APP, "Total handlers in map: %{public}zu", g_streamHandlers.size());
+
     napi_value result;
     napi_create_object(env, &result);
 
     auto it = g_streamHandlers.find(url);
     if (it != g_streamHandlers.end()) {
+        bool streaming = it->second->isStreaming();
+        OH_LOG_INFO(LOG_APP, "Handler found, isStreaming: %{public}s", streaming ? "true" : "false");
+
         napi_value isStreaming;
-        napi_get_boolean(env, it->second->isStreaming(), &isStreaming);
+        napi_get_boolean(env, streaming, &isStreaming);
         napi_set_named_property(env, result, "isStreaming", isStreaming);
 
         napi_value info;
         std::string streamInfo = it->second->getStreamInfo();
+        OH_LOG_INFO(LOG_APP, "Stream info: %{public}s", streamInfo.c_str());
         napi_create_string_utf8(env, streamInfo.c_str(), NAPI_AUTO_LENGTH, &info);
         napi_set_named_property(env, result, "info", info);
     } else {
+        OH_LOG_WARN(LOG_APP, "Handler not found for URL: %{public}s", url.c_str());
         napi_value isStreaming;
         napi_get_boolean(env, false, &isStreaming);
         napi_set_named_property(env, result, "isStreaming", isStreaming);
@@ -210,6 +239,47 @@ static napi_value GetFrameStats(napi_env env, napi_callback_info info) {
     return result;
 }
 
+// 更新视频surface大小
+static napi_value UpdateVideoSurfaceSize(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    if (argc != 3) {
+        napi_throw_error(env, nullptr, "Expected 3 arguments: surfaceId, width, height");
+        return nullptr;
+    }
+
+    // 获取surfaceId
+    int64_t surfaceId = 0;
+    bool lossless = true;
+    if (napi_ok != napi_get_value_bigint_int64(env, args[0], &surfaceId, &lossless)) {
+        napi_throw_error(env, nullptr, "Failed to get surfaceId");
+        return nullptr;
+    }
+
+    // 获取宽高
+    double width, height;
+    if (napi_ok != napi_get_value_double(env, args[1], &width)) {
+        napi_throw_error(env, nullptr, "Failed to get width");
+        return nullptr;
+    }
+    if (napi_ok != napi_get_value_double(env, args[2], &height)) {
+        napi_throw_error(env, nullptr, "Failed to get height");
+        return nullptr;
+    }
+
+    // 获取视频渲染器并更新大小
+    auto videoRenderer = PluginManager::GetVideoRenderer(surfaceId);
+    if (videoRenderer) {
+        videoRenderer->UpdateSize(static_cast<int>(width), static_cast<int>(height));
+    }
+
+    napi_value result;
+    napi_get_boolean(env, true, &result);
+    return result;
+}
+
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor desc[] = {
@@ -217,17 +287,12 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"stopVideoStream", nullptr, StopVideoStream, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getStreamStatus", nullptr, GetStreamStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getFrameStats", nullptr, GetFrameStats, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"SetSurfaceId", nullptr, PluginManager::SetSurfaceId,
-            nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"ChangeSurface", nullptr, PluginManager::ChangeSurface,
-            nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"GetXComponentStatus", nullptr, PluginManager::GetXComponentStatus,
-            nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"DrawPattern", nullptr, PluginManager::DrawPattern,
-            nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"DestroySurface", nullptr, PluginManager::DestroySurface,
-            nullptr, nullptr, nullptr, napi_default, nullptr}
-    };
+        {"updateVideoSurfaceSize", nullptr, UpdateVideoSurfaceSize, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setSurfaceId", nullptr, PluginManager::SetSurfaceId, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"changeSurface", nullptr, PluginManager::ChangeSurface, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"getXComponentStatus", nullptr, PluginManager::GetXComponentStatus, nullptr, nullptr, nullptr, napi_default,
+         nullptr},
+        {"destroySurface", nullptr, PluginManager::DestroySurface, nullptr, nullptr, nullptr, napi_default, nullptr}};
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
 }
