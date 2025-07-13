@@ -163,57 +163,78 @@ void PrintFirstFrameDataAndExit(const VideoFrame &frame) {
 }
 
 /**
- * Create a test YUV frame with gradient pattern
+ * Create a test YUV frame with gradient pattern and FFmpeg-style padding
  */
 bool LoadYUVFromRawfile(VideoFrame &frame) {
-    // 创建320x176的YUV420测试帧
+    // 创建320x176的YUV420测试帧，模拟FFmpeg的填充格式
     const int width = 320;
     const int height = 176;
-    const int y_size = width * height;
-    const int uv_size = (width / 2) * (height / 2);
+
+    // 模拟FFmpeg的linesize（包含填充）
+    const int y_linesize = 384;  // 320 + 64 填充
+    const int uv_linesize = 192; // 160 + 32 填充
+
+    const int y_total_size = y_linesize * height;
+    const int uv_total_size = uv_linesize * (height / 2);
 
     // 使用静态存储确保数据在函数返回后仍然有效
-    static std::vector<uint8_t> y_data(y_size);
-    static std::vector<uint8_t> u_data(uv_size);
-    static std::vector<uint8_t> v_data(uv_size);
+    static std::vector<uint8_t> y_data(y_total_size);
+    static std::vector<uint8_t> u_data(uv_total_size);
+    static std::vector<uint8_t> v_data(uv_total_size);
 
-    // 创建Y平面渐变图案 - 从左到右，从上到下的渐变
+    // 初始化所有数据为0（模拟填充区域）
+    std::fill(y_data.begin(), y_data.end(), 0);
+    std::fill(u_data.begin(), u_data.end(), 128); // UV默认中性值
+    std::fill(v_data.begin(), v_data.end(), 128);
+
+    // 创建Y平面渐变图案 - 只填充前320列，后64列保持为填充
     for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
+        for (int x = 0; x < width; x++) { // 只填充实际宽度
             // 创建对角线渐变效果
             int value = ((x + y) * 255) / (width + height);
-            y_data[y * width + x] = static_cast<uint8_t>(value);
+            y_data[y * y_linesize + x] = static_cast<uint8_t>(value);
         }
+        // 填充区域保持为0（已经初始化）
     }
 
-    // 创建U平面图案 - 蓝色色调变化
+    // 创建U平面图案 - 只填充前160列，后32列保持为填充
     for (int y = 0; y < height / 2; y++) {
-        for (int x = 0; x < width / 2; x++) {
+        for (int x = 0; x < width / 2; x++) {         // 只填充实际宽度
             int value = 128 + (x * 64) / (width / 2); // 128-192 范围
-            u_data[y * (width / 2) + x] = static_cast<uint8_t>(std::min(255, value));
+            u_data[y * uv_linesize + x] = static_cast<uint8_t>(std::min(255, value));
         }
+        // 填充区域保持为128（已经初始化）
     }
 
-    // 创建V平面图案 - 红色色调变化
+    // 创建V平面图案 - 只填充前160列，后32列保持为填充
     for (int y = 0; y < height / 2; y++) {
-        for (int x = 0; x < width / 2; x++) {
+        for (int x = 0; x < width / 2; x++) {          // 只填充实际宽度
             int value = 128 + (y * 64) / (height / 2); // 128-192 范围
-            v_data[y * (width / 2) + x] = static_cast<uint8_t>(std::min(255, value));
+            v_data[y * uv_linesize + x] = static_cast<uint8_t>(std::min(255, value));
         }
+        // 填充区域保持为128（已经初始化）
     }
 
-    // 填充VideoFrame结构
+    // 填充VideoFrame结构 - 使用带填充的linesize
     frame.width = width;
     frame.height = height;
     frame.data[0] = y_data.data();
     frame.data[1] = u_data.data();
     frame.data[2] = v_data.data();
-    frame.linesize[0] = width;
-    frame.linesize[1] = width / 2;
-    frame.linesize[2] = width / 2;
+    frame.linesize[0] = y_linesize;  // 384（包含64字节填充）
+    frame.linesize[1] = uv_linesize; // 192（包含32字节填充）
+    frame.linesize[2] = uv_linesize; // 192（包含32字节填充）
 
-    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Created test YUV pattern: %{public}dx%{public}d",
-                 width, height);
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                 "Created test YUV pattern with padding: %{public}dx%{public}d, linesize[Y=%{public}d, U=%{public}d, "
+                 "V=%{public}d]",
+                 width, height, frame.linesize[0], frame.linesize[1], frame.linesize[2]);
+
+    // 验证填充数据
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                 "Y padding: %{public}d bytes, UV padding: %{public}d bytes per row", y_linesize - width,
+                 uv_linesize - (width / 2));
+
     return true;
 }
 
@@ -306,14 +327,14 @@ const EGLint ATTRIB_LIST[] = {
     // Key,value.
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_RED_SIZE, EGL_RED_SIZE_DEFAULT, EGL_GREEN_SIZE, EGL_GREEN_SIZE_DEFAULT,
     EGL_BLUE_SIZE, EGL_BLUE_SIZE_DEFAULT, EGL_ALPHA_SIZE, EGL_ALPHA_SIZE_DEFAULT, EGL_RENDERABLE_TYPE,
-    EGL_OPENGL_ES2_BIT,
+    EGL_OPENGL_ES3_BIT, // 修复：添加ES3支持
     // End.
     EGL_NONE};
 
 /**
  * Context attributes.
  */
-const EGLint CONTEXT_ATTRIBS[] = {EGL_CONTEXT_CLIENT_VERSION, 2, EGL_NONE};
+const EGLint CONTEXT_ATTRIBS[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
 } // namespace
 
 bool EGLCore::EglContextInit(void *window) {
@@ -488,8 +509,9 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
 
     // 检查是否已经渲染了第一帧，如果是则跳过后续帧的渲染
     if (firstFrameRendered_) {
-        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "First frame already rendered, skipping subsequent frames");
-        return true;  // 返回true表示"成功"，但实际上跳过了渲染
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                     "First frame already rendered, skipping subsequent frames");
+        return true; // 返回true表示"成功"，但实际上跳过了渲染
     }
 
     // 打印第一帧的详细数据
@@ -551,7 +573,8 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
     // 标记第一帧已经渲染完成
     if (!firstFrameRendered_) {
         firstFrameRendered_ = true;
-        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "First frame rendered successfully. Subsequent frames will be skipped.");
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                     "First frame rendered successfully. Subsequent frames will be skipped.");
     }
 
     // OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Frame rendered successfully to surface");
@@ -775,60 +798,61 @@ void EGLCore::UpdateSize(int width, int height) {
     height_ = height;
     OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "UpdateSize: %{public}dx%{public}d", width_, height_);
 
-    // // 如果纹理已经初始化并且窗口尺寸有效，渲染测试帧
-    // if (texturesInitialized_ && width_ > 0 && height_ > 0) {
-    //     VideoFrame testFrame;
-    //     if (LoadYUVFromRawfile(testFrame)) {
-    //         OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Rendering test frame after size update");
+    // 如果纹理已经初始化并且窗口尺寸有效，渲染测试帧
+    if (texturesInitialized_ && width_ > 0 && height_ > 0) {
+        VideoFrame testFrame;
+        if (LoadYUVFromRawfile(testFrame)) {
+            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                         "Rendering test frame with padding after size update");
 
-    //         // 确保EGL上下文是当前的
-    //         if (eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
-    //             // 清除屏幕
-    //             glViewport(DEFAULT_X_POSITION, DEFAULT_Y_POSITION, width_, height_);
-    //             glClearColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色背景
-    //             glClear(GL_COLOR_BUFFER_BIT);
+            // 确保EGL上下文是当前的
+            if (eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
+                // 清除屏幕
+                glViewport(DEFAULT_X_POSITION, DEFAULT_Y_POSITION, width_, height_);
+                glClearColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色背景
+                glClear(GL_COLOR_BUFFER_BIT);
 
-    //             // 更新纹理并渲染
-    //             if (UpdateYUVTextures(testFrame)) {
-    //                 glUseProgram(program_);
+                // 更新纹理并渲染
+                if (UpdateYUVTextures(testFrame)) {
+                    glUseProgram(program_);
 
-    //                 // 绑定纹理
-    //                 glActiveTexture(GL_TEXTURE0);
-    //                 glBindTexture(GL_TEXTURE_2D, yTexture_);
-    //                 glUniform1i(yTextureLocation_, 0);
+                    // 绑定纹理
+                    glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, yTexture_);
+                    glUniform1i(yTextureLocation_, 0);
 
-    //                 glActiveTexture(GL_TEXTURE1);
-    //                 glBindTexture(GL_TEXTURE_2D, uTexture_);
-    //                 glUniform1i(uTextureLocation_, 1);
+                    glActiveTexture(GL_TEXTURE1);
+                    glBindTexture(GL_TEXTURE_2D, uTexture_);
+                    glUniform1i(uTextureLocation_, 1);
 
-    //                 glActiveTexture(GL_TEXTURE2);
-    //                 glBindTexture(GL_TEXTURE_2D, vTexture_);
-    //                 glUniform1i(vTextureLocation_, 2);
+                    glActiveTexture(GL_TEXTURE2);
+                    glBindTexture(GL_TEXTURE_2D, vTexture_);
+                    glUniform1i(vTextureLocation_, 2);
 
-    //                 // 绘制
-    //                 glBindVertexArray(VAO_);
-    //                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-    //                 glBindVertexArray(0);
+                    // 绘制
+                    glBindVertexArray(VAO_);
+                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+                    glBindVertexArray(0);
 
-    //                 // 交换缓冲区显示
-    //                 glFlush();
-    //                 eglSwapBuffers(eglDisplay_, eglSurface_);
+                    // 交换缓冲区显示
+                    glFlush();
+                    eglSwapBuffers(eglDisplay_, eglSurface_);
 
-    //                 OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Test YUV frame displayed after
-    //                 UpdateSize");
-    //             } else {
-    //                 OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Failed to update YUV textures in
-    //                 UpdateSize");
-    //             }
-    //         } else {
-    //             OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Failed to make EGL context current in
-    //             UpdateSize");
-    //         }
-    //     } else {
-    //         OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Failed to load test YUV frame in
-    //         UpdateSize");
-    //     }
-    // }
+                    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                                 "Test YUV frame with padding displayed after UpdateSize");
+                } else {
+                    OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
+                                 "Failed to update YUV textures in UpdateSize");
+                }
+            } else {
+                OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
+                             "Failed to make EGL context current in UpdateSize");
+            }
+        } else {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
+                         "Failed to load test YUV frame in UpdateSize");
+        }
+    }
 }
 
 void EGLCore::Release() {
