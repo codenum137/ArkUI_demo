@@ -326,19 +326,6 @@ bool VideoStreamHandler::processFrame(AVFrame *frame) {
         return false;
     }
 
-    // // 检查行大小
-    // OH_LOG_INFO(LOG_APP, "Frame linesize: Y=%{public}d, U=%{public}d, V=%{public}d", frame->linesize[0],
-    //             frame->linesize[1], frame->linesize[2]);
-
-    // // 验证第一个像素的数据（调试用）
-    // if (frame->data[0]) {
-    //     uint8_t y_sample = frame->data[0][0];
-    //     uint8_t u_sample = frame->data[1] ? frame->data[1][0] : 0;
-    //     uint8_t v_sample = frame->data[2] ? frame->data[2][0] : 0;
-    //     OH_LOG_INFO(LOG_APP, "First pixel YUV values: Y=%{public}d, U=%{public}d, V=%{public}d", y_sample, u_sample,
-    //                 v_sample);
-    // }
-
     // 创建VideoFrame结构
     VideoFrame videoFrame;
     videoFrame.width = frameWidth_;

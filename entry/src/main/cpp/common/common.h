@@ -14,4 +14,4 @@
 #include <napi/native_api.h>
 const unsigned int LOG_PRINT_DOMAIN = 0xFF00;
 
-#endif //ARKUI_DEMO_COMMON_H
+#endif // ARKUI_DEMO_COMMON_H

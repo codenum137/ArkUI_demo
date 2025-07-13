@@ -39,6 +39,9 @@
 #include <cstdio>
 #include <hilog/log.h>
 #include <native_window/external_window.h>
+#include <string>
+#include <vector>
+
 
 #include "../common/common.h"
 #include "plugin_render.h"
@@ -55,14 +58,174 @@ static_assert(std::is_pointer<EGLNativeWindowType>::value || sizeof(EGLNativeWin
 namespace VideoStreamNS {
 namespace {
 /**
+ * Get detailed OpenGL error description
+ */
+const char *GetGLErrorString(GLenum error) {
+    switch (error) {
+    case GL_NO_ERROR:
+        return "GL_NO_ERROR";
+    case GL_INVALID_ENUM:
+        return "GL_INVALID_ENUM - An unacceptable value is specified for an enumerated argument";
+    case GL_INVALID_VALUE:
+        return "GL_INVALID_VALUE - A numeric argument is out of range";
+    case GL_INVALID_OPERATION:
+        return "GL_INVALID_OPERATION - The specified operation is not allowed in the current state";
+    case GL_OUT_OF_MEMORY:
+        return "GL_OUT_OF_MEMORY - There is not enough memory left to execute the command";
+    case GL_INVALID_FRAMEBUFFER_OPERATION:
+        return "GL_INVALID_FRAMEBUFFER_OPERATION - The framebuffer object is not complete";
+    default:
+        return "Unknown OpenGL error";
+    }
+}
+
+/**
+ * Check and report OpenGL errors with detailed information
+ */
+bool CheckGLError(const char *operation) {
+    GLenum error = glGetError();
+    if (error != GL_NO_ERROR) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
+                     "OpenGL error in %{public}s: 0x%{public}x (%{public}d) - %{public}s", operation, error, error,
+                     GetGLErrorString(error));
+        return false;
+    }
+    return true;
+}
+
+/**
+ * Print complete first frame YUV data and terminate program
+ */
+void PrintFirstFrameDataAndExit(const VideoFrame &frame) {
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "=== FIRST FRAME DATA ANALYSIS ===");
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                 "Frame: %{public}dx%{public}d, linesize[Y=%{public}d, U=%{public}d, V=%{public}d]", frame.width,
+                 frame.height, frame.linesize[0], frame.linesize[1], frame.linesize[2]);
+
+    // 打印Y平面完整数据 - 每行一个字符串
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "=== Y PLANE FULL DATA ===");
+    for (int row = 0; row < frame.height; row++) {
+        std::string line_data = "";
+        for (int col = 0; col < frame.linesize[0]; col++) {
+            if (col > 0)
+                line_data += " ";
+            line_data += std::to_string(frame.data[0][row * frame.linesize[0] + col]);
+        }
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Y_row_%{public}d: %{public}s", row,
+                     line_data.c_str());
+    }
+
+    // 打印U平面完整数据
+    if (frame.data[1] != nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "=== U PLANE FULL DATA ===");
+        for (int row = 0; row < frame.height / 2; row++) {
+            std::string line_data = "";
+            for (int col = 0; col < frame.linesize[1]; col++) {
+                if (col > 0)
+                    line_data += " ";
+                line_data += std::to_string(frame.data[1][row * frame.linesize[1] + col]);
+            }
+            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "U_row_%{public}d: %{public}s", row,
+                         line_data.c_str());
+        }
+    }
+
+    // 打印V平面完整数据
+    if (frame.data[2] != nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "=== V PLANE FULL DATA ===");
+        for (int row = 0; row < frame.height / 2; row++) {
+            std::string line_data = "";
+            for (int col = 0; col < frame.linesize[2]; col++) {
+                if (col > 0)
+                    line_data += " ";
+                line_data += std::to_string(frame.data[2][row * frame.linesize[2] + col]);
+            }
+            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "V_row_%{public}d: %{public}s", row,
+                         line_data.c_str());
+        }
+    }
+
+    // 数据指针地址
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                 "Data pointers: Y=%{public}p, U=%{public}p, V=%{public}p", frame.data[0], frame.data[1],
+                 frame.data[2]);
+
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "=== END FIRST FRAME DATA ANALYSIS ===");
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                 "First frame analysis complete. Terminating program to ensure complete output.");
+
+    // 强制刷新日志输出
+    fflush(stdout);
+    fflush(stderr);
+
+    // 程序终止，确保第一帧数据完整输出
+    exit(0);
+}
+
+/**
+ * Create a test YUV frame with gradient pattern
+ */
+bool LoadYUVFromRawfile(VideoFrame &frame) {
+    // 创建320x176的YUV420测试帧
+    const int width = 320;
+    const int height = 176;
+    const int y_size = width * height;
+    const int uv_size = (width / 2) * (height / 2);
+
+    // 使用静态存储确保数据在函数返回后仍然有效
+    static std::vector<uint8_t> y_data(y_size);
+    static std::vector<uint8_t> u_data(uv_size);
+    static std::vector<uint8_t> v_data(uv_size);
+
+    // 创建Y平面渐变图案 - 从左到右，从上到下的渐变
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            // 创建对角线渐变效果
+            int value = ((x + y) * 255) / (width + height);
+            y_data[y * width + x] = static_cast<uint8_t>(value);
+        }
+    }
+
+    // 创建U平面图案 - 蓝色色调变化
+    for (int y = 0; y < height / 2; y++) {
+        for (int x = 0; x < width / 2; x++) {
+            int value = 128 + (x * 64) / (width / 2); // 128-192 范围
+            u_data[y * (width / 2) + x] = static_cast<uint8_t>(std::min(255, value));
+        }
+    }
+
+    // 创建V平面图案 - 红色色调变化
+    for (int y = 0; y < height / 2; y++) {
+        for (int x = 0; x < width / 2; x++) {
+            int value = 128 + (y * 64) / (height / 2); // 128-192 范围
+            v_data[y * (width / 2) + x] = static_cast<uint8_t>(std::min(255, value));
+        }
+    }
+
+    // 填充VideoFrame结构
+    frame.width = width;
+    frame.height = height;
+    frame.data[0] = y_data.data();
+    frame.data[1] = u_data.data();
+    frame.data[2] = v_data.data();
+    frame.linesize[0] = width;
+    frame.linesize[1] = width / 2;
+    frame.linesize[2] = width / 2;
+
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Created test YUV pattern: %{public}dx%{public}d",
+                 width, height);
+    return true;
+}
+
+/**
  * YUV420 to RGB vertex shader.
  */
 const char YUV_VERTEX_SHADER[] = "#version 300 es\n"
-                                 "layout(location = 0) in vec4 a_position;\n"
+                                 "layout(location = 0) in vec2 a_position;\n"
                                  "layout(location = 1) in vec2 a_texCoord;\n"
                                  "out vec2 v_texCoord;\n"
                                  "void main() {\n"
-                                 "    gl_Position = a_position;\n"
+                                 "    gl_Position = vec4(a_position,0.0,1.0);\n"
                                  "    v_texCoord = a_texCoord;\n"
                                  "}\n";
 
@@ -231,7 +394,6 @@ bool EGLCore::CreateEnvironment() {
     }
     // Create program.
     program_ = CreateProgram(YUV_VERTEX_SHADER, YUV_FRAGMENT_SHADER);
-    // program_ = CreateProgram(YUV_VERTEX_SHADER, TEST_FRAGMENT_SHADER); // 纯红
     if (program_ == PROGRAM_ERROR) {
         OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "CreateProgram: unable to create program");
         return false;
@@ -248,6 +410,10 @@ bool EGLCore::CreateEnvironment() {
 }
 
 bool EGLCore::InitYUVTextures() {
+    const GLubyte *version = glGetString(GL_VERSION);   // 获取OpenGL版本（如 "OpenGL ES 2.0"）
+    const GLubyte *renderer = glGetString(GL_RENDERER); // 获取渲染器名称（如GPU型号）
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "GL_VERSION: %{public}s, GL_RENDERER:%{public}s",
+                 version, renderer);
     // Generate and bind VAO
     glGenVertexArrays(1, &VAO_);
     glBindVertexArray(VAO_);
@@ -274,15 +440,40 @@ bool EGLCore::InitYUVTextures() {
     glGenTextures(1, &uTexture_);
     glGenTextures(1, &vTexture_);
 
+    // Configure Y texture parameters (only once during initialization)
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, yTexture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Configure U texture parameters (only once during initialization)
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, uTexture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Configure V texture parameters (only once during initialization)
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, vTexture_);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
     // Get uniform locations
     yTextureLocation_ = glGetUniformLocation(program_, "y_texture");
     uTextureLocation_ = glGetUniformLocation(program_, "u_texture");
     vTextureLocation_ = glGetUniformLocation(program_, "v_texture");
 
     texturesInitialized_ = true;
-    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "YUV textures initialized");
+
     return true;
 }
+
 
 bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
     if (!texturesInitialized_) {
@@ -294,6 +485,17 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
         OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "RenderYUVFrame: EGL context is null");
         return false;
     }
+
+    // 检查是否已经渲染了第一帧，如果是则跳过后续帧的渲染
+    if (firstFrameRendered_) {
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "First frame already rendered, skipping subsequent frames");
+        return true;  // 返回true表示"成功"，但实际上跳过了渲染
+    }
+
+    // 打印第一帧的详细数据
+    // if (frame.data[0] != nullptr) {
+    //     PrintFirstFrameDataAndExit(frame);
+    // }
 
     // 确保EGL上下文是当前的
     if (!eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
@@ -332,9 +534,7 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
     DrawQuad();
 
     // 检查OpenGL错误
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error before swap: %{public}d", error);
+    if (!CheckGLError("after DrawQuad")) {
         return false;
     }
 
@@ -348,6 +548,12 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
         return false;
     }
 
+    // 标记第一帧已经渲染完成
+    if (!firstFrameRendered_) {
+        firstFrameRendered_ = true;
+        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "First frame rendered successfully. Subsequent frames will be skipped.");
+    }
+
     // OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Frame rendered successfully to surface");
     return true;
 }
@@ -358,97 +564,112 @@ bool EGLCore::UpdateYUVTextures(const VideoFrame &frame) {
         return false;
     }
 
-    // 添加数据验证
-    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
-                 "Frame data pointers: Y= %{public}p, U= %{public}p, V= %{public}p", frame.data[0], frame.data[1],
-                 frame.data[2]);
+    // 验证帧数据有效性
+    if (frame.width <= 0 || frame.height <= 0) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Invalid frame dimensions: %{public}dx%{public}d",
+                     frame.width, frame.height);
+        return false;
+    }
 
+    if (frame.linesize[0] <= 0) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Invalid Y linesize: %{public}d",
+                     frame.linesize[0]);
+        return false;
+    }
+
+    // 添加数据验证
     OH_LOG_Print(
         LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
         "UpdateYUVTextures: %{public}dx%{public}d, Y_linesize=%{public}d, U_linesize=%{public}d, V_linesize=%{public}d",
         frame.width, frame.height, frame.linesize[0], frame.linesize[1], frame.linesize[2]);
 
+    // Clear any existing OpenGL errors
+    while (glGetError() != GL_NO_ERROR) {
+    }
 
-    // 检查是否有填充
-    bool yPadding = (frame.linesize[0] != frame.width);
-    bool uvPadding = (frame.linesize[1] != frame.width / 2);
-    // OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
-    //              "Padding detected: Y_padding=%{public}s, UV_padding=%{public}s", yPadding ? "YES" : "NO",
-    //              uvPadding ? "YES" : "NO");
+    // 保存当前的像素存储参数
+    GLint oldUnpackAlignment;
+    GLint oldUnpackRowLength;
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &oldUnpackAlignment);
+    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &oldUnpackRowLength);
 
-    // Update Y texture
+    // Update Y texture with linesize padding handling
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, yTexture_);
-    if (yPadding) {
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.linesize[0]);
-    }
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, frame.width, frame.height, 0, GL_RED, GL_UNSIGNED_BYTE, frame.data[0]);
-    if (yPadding) {
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-    }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if (!CheckGLError("glActiveTexture(GL_TEXTURE0)"))
+        return false;
 
-    // Update U texture
+    glBindTexture(GL_TEXTURE_2D, yTexture_);
+    if (!CheckGLError("glBindTexture Y texture"))
+        return false;
+
+    // 设置像素存储参数来处理linesize填充
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);                  // 字节对齐
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.linesize[0]); // 设置行长度为linesize
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, frame.width, frame.height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+                 frame.data[0]);
+    if (!CheckGLError("Y texture glTexImage2D with linesize"))
+        return false;
+
+    // Update U texture with linesize padding handling
     if (frame.data[1] != nullptr) {
         glActiveTexture(GL_TEXTURE1);
+        if (!CheckGLError("glActiveTexture(GL_TEXTURE1)"))
+            return false;
+
         glBindTexture(GL_TEXTURE_2D, uTexture_);
-        if (uvPadding) {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.linesize[1]);
-        }
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, frame.width / 2, frame.height / 2, 0, GL_RED, GL_UNSIGNED_BYTE,
-                     frame.data[1]);
-        if (uvPadding) {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        }
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (!CheckGLError("glBindTexture U texture"))
+            return false;
+
+        // 设置U平面的行长度
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.linesize[1]);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, frame.width / 2, frame.height / 2, 0, GL_LUMINANCE,
+                     GL_UNSIGNED_BYTE, frame.data[1]);
+        if (!CheckGLError("U texture glTexImage2D with linesize"))
+            return false;
     }
 
-    // Update V texture
+    // Update V texture with linesize padding handling
     if (frame.data[2] != nullptr) {
         glActiveTexture(GL_TEXTURE2);
+        if (!CheckGLError("glActiveTexture(GL_TEXTURE2)"))
+            return false;
+
         glBindTexture(GL_TEXTURE_2D, vTexture_);
-        if (uvPadding) {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.linesize[2]);
-        }
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, frame.width / 2, frame.height / 2, 0, GL_RED, GL_UNSIGNED_BYTE,
-                     frame.data[2]);
-        if (uvPadding) {
-            glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        }
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (!CheckGLError("glBindTexture V texture"))
+            return false;
+
+        // 设置V平面的行长度
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.linesize[2]);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, frame.width / 2, frame.height / 2, 0, GL_LUMINANCE,
+                     GL_UNSIGNED_BYTE, frame.data[2]);
+        if (!CheckGLError("V texture glTexImage2D with linesize"))
+            return false;
     }
 
-    // 检查OpenGL错误
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error in UpdateYUVTextures: %{public}d",
-                     error);
-        return false;
-    }
+    // 恢复原来的像素存储参数
+    glPixelStorei(GL_UNPACK_ALIGNMENT, oldUnpackAlignment);
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, oldUnpackRowLength);
 
-    // OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "YUV textures updated successfully");
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                 "YUV textures updated successfully with linesize padding handled");
+
     return true;
 }
 
 void EGLCore::DrawQuad() {
     glBindVertexArray(VAO_);
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-    glBindVertexArray(0);
+    if (!CheckGLError("glBindVertexArray"))
+        return;
 
-    // 检查绘制错误
-    GLenum error = glGetError();
-    if (error != GL_NO_ERROR) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "OpenGL error in DrawQuad: %{public}d", error);
-    }
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    if (!CheckGLError("glDrawElements"))
+        return;
+
+    glBindVertexArray(0);
+    CheckGLError("glBindVertexArray(0)");
 }
 
 GLuint EGLCore::LoadShader(GLenum type, const char *shaderSrc) {
@@ -484,7 +705,7 @@ GLuint EGLCore::LoadShader(GLenum type, const char *shaderSrc) {
     if (infoLog != nullptr) {
         memset(infoLog, 0, infoLen + 1);
         glGetShaderInfoLog(shader, infoLen, nullptr, infoLog);
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "glCompileShader error = %s", infoLog);
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "glCompileShader error = %{public}s", infoLog);
         free(infoLog);
         infoLog = nullptr;
     }
@@ -539,7 +760,7 @@ GLuint EGLCore::CreateProgram(const char *vertexShader, const char *fragShader) 
         char *infoLog = (char *)malloc(sizeof(char) * (infoLen + 1));
         memset(infoLog, 0, infoLen + 1);
         glGetProgramInfoLog(program, infoLen, nullptr, infoLog);
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "glLinkProgram error = %s", infoLog);
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "glLinkProgram error = %{public}s", infoLog);
         free(infoLog);
         infoLog = nullptr;
     }
@@ -553,15 +774,64 @@ void EGLCore::UpdateSize(int width, int height) {
     width_ = width;
     height_ = height;
     OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "UpdateSize: %{public}dx%{public}d", width_, height_);
+
+    // // 如果纹理已经初始化并且窗口尺寸有效，渲染测试帧
+    // if (texturesInitialized_ && width_ > 0 && height_ > 0) {
+    //     VideoFrame testFrame;
+    //     if (LoadYUVFromRawfile(testFrame)) {
+    //         OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Rendering test frame after size update");
+
+    //         // 确保EGL上下文是当前的
+    //         if (eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
+    //             // 清除屏幕
+    //             glViewport(DEFAULT_X_POSITION, DEFAULT_Y_POSITION, width_, height_);
+    //             glClearColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色背景
+    //             glClear(GL_COLOR_BUFFER_BIT);
+
+    //             // 更新纹理并渲染
+    //             if (UpdateYUVTextures(testFrame)) {
+    //                 glUseProgram(program_);
+
+    //                 // 绑定纹理
+    //                 glActiveTexture(GL_TEXTURE0);
+    //                 glBindTexture(GL_TEXTURE_2D, yTexture_);
+    //                 glUniform1i(yTextureLocation_, 0);
+
+    //                 glActiveTexture(GL_TEXTURE1);
+    //                 glBindTexture(GL_TEXTURE_2D, uTexture_);
+    //                 glUniform1i(uTextureLocation_, 1);
+
+    //                 glActiveTexture(GL_TEXTURE2);
+    //                 glBindTexture(GL_TEXTURE_2D, vTexture_);
+    //                 glUniform1i(vTextureLocation_, 2);
+
+    //                 // 绘制
+    //                 glBindVertexArray(VAO_);
+    //                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    //                 glBindVertexArray(0);
+
+    //                 // 交换缓冲区显示
+    //                 glFlush();
+    //                 eglSwapBuffers(eglDisplay_, eglSurface_);
+
+    //                 OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Test YUV frame displayed after
+    //                 UpdateSize");
+    //             } else {
+    //                 OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Failed to update YUV textures in
+    //                 UpdateSize");
+    //             }
+    //         } else {
+    //             OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Failed to make EGL context current in
+    //             UpdateSize");
+    //         }
+    //     } else {
+    //         OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Failed to load test YUV frame in
+    //         UpdateSize");
+    //     }
+    // }
 }
 
 void EGLCore::Release() {
-    // Cleanup programs
-    if (program_ != 0) {
-        glDeleteProgram(program_);
-        program_ = 0;
-    }
-
     // Cleanup textures and buffers
     if (texturesInitialized_) {
         glDeleteTextures(1, &yTexture_);
@@ -584,42 +854,5 @@ void EGLCore::Release() {
     if ((eglDisplay_ == nullptr) || (!eglTerminate(eglDisplay_))) {
         OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", "Release eglTerminate failed");
     }
-}
-
-bool EGLCore::RenderSingleTestFrame(float r, float g, float b, float a) {
-    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", 
-                 "RenderSingleTestFrame: clearing with color (%.2f, %.2f, %.2f, %.2f)", r, g, b, a);
-    
-    // 检查EGL环境是否初始化
-    if (eglDisplay_ == EGL_NO_DISPLAY || eglContext_ == EGL_NO_CONTEXT || eglSurface_ == EGL_NO_SURFACE) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", 
-                     "RenderSingleTestFrame: EGL environment not initialized");
-        return false;
-    }
-    
-    // 设置当前上下文
-    if (!eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", 
-                     "RenderSingleTestFrame: eglMakeCurrent failed");
-        return false;
-    }
-    
-    // 设置视口
-    glViewport(0, 0, width_, height_);
-    
-    // 设置清除颜色并清除缓冲区
-    glClearColor(r, g, b, a);
-    glClear(GL_COLOR_BUFFER_BIT);
-    
-    // 交换缓冲区显示内容
-    if (!eglSwapBuffers(eglDisplay_, eglSurface_)) {
-        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore", 
-                     "RenderSingleTestFrame: eglSwapBuffers failed");
-        return false;
-    }
-    
-    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", 
-                 "RenderSingleTestFrame: Test frame rendered successfully");
-    return true;
 }
 } // namespace VideoStreamNS

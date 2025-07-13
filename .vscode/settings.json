@@ -1,6 +1,8 @@
 {
     "files.associations": {
         "memory": "cpp",
-        "type_traits": "cpp"
+        "type_traits": "cpp",
+        "array": "cpp",
+        "string": "cpp"
     }
 }

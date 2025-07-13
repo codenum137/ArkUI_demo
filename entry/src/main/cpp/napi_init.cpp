@@ -64,19 +64,12 @@ static napi_value StartVideoStream(napi_env env, napi_callback_info info) {
     // 创建视频流处理器
     OH_LOG_INFO(LOG_APP, "Creating VideoStreamHandler...");
     auto handler = std::make_shared<VideoStreamHandler>();
-    OH_LOG_INFO(LOG_APP, "VideoStreamHandler created successfully");
-
-    // 设置帧回调，将帧推送到渲染队列而不是直接渲染
+    OH_LOG_INFO(LOG_APP, "VideoStreamHandler created successfully"); // 设置帧回调，直接连接到视频渲染器
     handler->setFrameCallback([videoRenderer](const VideoFrame &frame) {
-        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "NAPI",
-                     "Frame received in callback: %{public}dx%{public}d, pts=%{public}ld", frame.width, frame.height,
-                     static_cast<long>(frame.pts));
-
-        // 将帧推送到渲染队列（生产者）
-        if (!videoRenderer->pushFrame(frame)) {
-            OH_LOG_Print(LOG_APP, LOG_WARN, LOG_PRINT_DOMAIN, "NAPI", "Failed to push frame to render queue");
-        } else {
-            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "NAPI", "Frame pushed to render queue successfully");
+        OH_LOG_INFO(LOG_APP, "Frame received: %{public}dx%{public}d, pts=%{public}ld", frame.width, frame.height,
+                    static_cast<long>(frame.pts));
+        if (!videoRenderer->RenderYUVFrame(frame)) {
+            OH_LOG_ERROR(LOG_APP, "Failed to render YUV frame");
         }
     });
 
@@ -287,74 +280,6 @@ static napi_value UpdateVideoSurfaceSize(napi_env env, napi_callback_info info) 
     return result;
 }
 
-// 渲染单个测试帧
-static napi_value RenderSingleTestFrame(napi_env env, napi_callback_info info) {
-    OH_LOG_INFO(LOG_APP, "=== RenderSingleTestFrame called ===");
-
-    size_t argc = 5; // surfaceId + 4个颜色值
-    napi_value args[5];
-
-    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-    OH_LOG_INFO(LOG_APP, "Got callback info, argc = %{public}zu", argc);
-
-    if (argc < 1) {
-        OH_LOG_ERROR(LOG_APP, "Missing parameters: at least surfaceId is required");
-        napi_throw_error(env, nullptr, "At least surfaceId parameter is required");
-        return nullptr;
-    }
-
-    // 获取surfaceId参数
-    int64_t surfaceId = 0;
-    bool lossless = true;
-    if (napi_ok != napi_get_value_bigint_int64(env, args[0], &surfaceId, &lossless)) {
-        napi_throw_error(env, nullptr, "Failed to get surfaceId");
-        return nullptr;
-    }
-
-    // 获取颜色参数，如果没有提供则使用默认值
-    float r = 0.2f, g = 0.6f, b = 0.9f, a = 1.0f; // 默认蓝色
-    
-    if (argc >= 2) {
-        double value;
-        napi_get_value_double(env, args[1], &value);
-        r = static_cast<float>(value);
-    }
-    if (argc >= 3) {
-        double value;
-        napi_get_value_double(env, args[2], &value);
-        g = static_cast<float>(value);
-    }
-    if (argc >= 4) {
-        double value;
-        napi_get_value_double(env, args[3], &value);
-        b = static_cast<float>(value);
-    }
-    if (argc >= 5) {
-        double value;
-        napi_get_value_double(env, args[4], &value);
-        a = static_cast<float>(value);
-    }
-
-    OH_LOG_INFO(LOG_APP, "RenderSingleTestFrame: surfaceId=%{public}lld, color(%.2f, %.2f, %.2f, %.2f)", 
-                static_cast<long long>(surfaceId), r, g, b, a);
-
-    // 获取视频渲染器
-    auto videoRenderer = PluginManager::GetVideoRenderer(surfaceId);
-    if (!videoRenderer) {
-        OH_LOG_ERROR(LOG_APP, "VideoRenderer not found for surfaceId: %{public}lld", static_cast<long long>(surfaceId));
-        napi_throw_error(env, nullptr, "VideoRenderer not found. Call setSurfaceId first.");
-        return nullptr;
-    }
-
-    // 渲染单个测试帧
-    bool success = videoRenderer->renderSingleTestFrame(r, g, b, a);
-    OH_LOG_INFO(LOG_APP, "RenderSingleTestFrame result: %{public}s", success ? "SUCCESS" : "FAILED");
-
-    napi_value result;
-    napi_get_boolean(env, success, &result);
-    return result;
-}
-
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
     napi_property_descriptor desc[] = {
@@ -363,7 +288,6 @@ static napi_value Init(napi_env env, napi_value exports) {
         {"getStreamStatus", nullptr, GetStreamStatus, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getFrameStats", nullptr, GetFrameStats, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"updateVideoSurfaceSize", nullptr, UpdateVideoSurfaceSize, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"renderSingleTestFrame", nullptr, RenderSingleTestFrame, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setSurfaceId", nullptr, PluginManager::SetSurfaceId, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"changeSurface", nullptr, PluginManager::ChangeSurface, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getXComponentStatus", nullptr, PluginManager::GetXComponentStatus, nullptr, nullptr, nullptr, napi_default,

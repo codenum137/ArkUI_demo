@@ -35,7 +35,6 @@ export const stopVideoStream: (url: string) => boolean;
 export const getStreamStatus: (url: string) => StreamStatus;
 export const getFrameStats: (url: string) => FrameStats;
 export const updateVideoSurfaceSize: (surfaceId: bigint, width: number, height: number) => boolean;
-export const renderSingleTestFrame: (surfaceId: bigint, r?: number, g?: number, b?: number, a?: number) => boolean;
 
 export const setSurfaceId: (id: bigint) => any;
 export const changeSurface: (id: bigint, w: number, h: number) => any;
