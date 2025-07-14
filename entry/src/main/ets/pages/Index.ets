@@ -10,22 +10,57 @@ interface StreamInfo {
   info: string;
 }
 
+class MyXComponentController extends XComponentController{
+  private parentComponent: Index | null = null;
+
+  setParent(parent: Index) {
+    this.parentComponent = parent;
+  }
+
+  onSurfaceCreated(surfaceId: string): void {
+    console.log(`onSurfaceCreated surfaceId: ${surfaceId}`);
+    videoStreamNapi.setSurfaceId(BigInt(surfaceId));
+    if (this.parentComponent) {
+      this.parentComponent.setSurfaceId(surfaceId);
+    }
+  }
+  onSurfaceChanged(surfaceId: string, rect: SurfaceRect): void {
+    console.log(`onSurfaceChanged surfaceId: ${surfaceId}, rect: ${JSON.stringify(rect)}}`);
+    videoStreamNapi.changeSurface(BigInt(surfaceId), rect.surfaceWidth, rect.surfaceHeight);
+  }
+  onSurfaceDestroyed(surfaceId: string): void {
+    console.log(`onSurfaceDestroyed surfaceId: ${surfaceId}`);
+    videoStreamNapi.destroySurface(BigInt(surfaceId));
+    if (this.parentComponent) {
+      this.parentComponent.setSurfaceId('');
+    }
+  }
+}
+
 @Entry
 @Component
 struct Index {
-  @State streamUrl: string = 'rtsp://77.110.228.219/axis-media/media.amp';
+  // @State streamUrl: string = 'rtsp://77.110.228.219/axis-media/media.amp';
+  @State streamUrl: string ='rtsp://10.129.177.159:8554/mystream';
   @State isStreaming: boolean = false;
   @State streamInfo: string = 'No stream';
-  @State logs: string[] = [];
   @State frameCount: number = 0;
   @State frameRate: number = 0;
+  @State surfaceId: string = '';
+  xComponentController: MyXComponentController = new MyXComponentController();
+
+  aboutToAppear(): void {
+    this.xComponentController.setParent(this);
+  }
+
+  setSurfaceId(id: string): void {
+    this.surfaceId = id;
+    console.log(`Surface ID updated: ${id}`);
+  }
 
   addLog(message: string): void {
-    const timestamp = new Date().toLocaleTimeString();
-    this.logs.unshift(`[${timestamp}] ${message}`);
-    if (this.logs.length > 10) {
-      this.logs = this.logs.slice(0, 10);
-    }
+    // 简化为只输出console日志
+    console.log(`[VideoStream] ${message}`);
     hilog.info(DOMAIN, 'VideoStream', message);
   }
 
@@ -35,17 +70,24 @@ struct Index {
       return;
     }
 
+    if (!this.surfaceId) {
+      this.addLog('Surface未准备好，请稍后重试');
+      return;
+    }
+
     this.addLog(`准备开始播放流: ${this.streamUrl}`);
 
     try {
       this.addLog('调用NAPI startVideoStream...');
-      const result = videoStreamNapi.startVideoStream(this.streamUrl);
+      const result = videoStreamNapi.startVideoStream(this.streamUrl, BigInt(this.surfaceId));
       this.addLog(`NAPI调用结果: success=${result.success}, url=${result.url}`);
 
       if (result.success) {
-        this.isStreaming = true;
         this.addLog(`流启动成功: ${this.streamUrl}`);
-        this.checkStreamStatus();
+        // 延迟1秒后开始检查状态，让C++端有时间建立连接
+        setTimeout(() => {
+          this.checkStreamStatus();
+        }, 1000);
       } else {
         this.addLog(`启动流失败: ${this.streamUrl}`);
       }
@@ -81,6 +123,8 @@ struct Index {
 
     try {
       const status = videoStreamNapi.getStreamStatus(this.streamUrl);
+      this.addLog(`状态检查: isStreaming=${status.isStreaming}, info=${status.info}`);
+      
       this.isStreaming = status.isStreaming;
       this.streamInfo = status.info;
 
@@ -89,11 +133,14 @@ struct Index {
         const frameStats = videoStreamNapi.getFrameStats(this.streamUrl);
         this.frameCount = frameStats.frameCount;
         this.frameRate = frameStats.frameRate;
+        this.addLog(`帧统计: count=${this.frameCount}, rate=${this.frameRate.toFixed(1)}fps`);
 
         // 如果还在播放，3秒后再次检查
         setTimeout((): void => {
           this.checkStreamStatus();
         }, 3000);
+      } else {
+        this.addLog('流未在播放状态');
       }
     } catch (error) {
       this.addLog(`检查流状态异常: ${error}`);
@@ -156,9 +203,9 @@ struct Index {
               .width('48%')
               .height(40)
               .fontSize(16)
-              .backgroundColor(this.isStreaming ? '#9ca3af' : '#10b981')
+              .backgroundColor(this.isStreaming ? '#9ca3af' : (!this.surfaceId ? '#f59e0b' : '#10b981'))
               .fontColor(Color.White)
-              .enabled(!this.isStreaming)
+              .enabled(!this.isStreaming && !!this.surfaceId)
               .onClick(() => this.startStream())
 
             Button('停止播放')
@@ -177,111 +224,74 @@ struct Index {
 
           // 视频显示区域
           Column() {
-            Text('视频显示')
-              .fontSize(16)
-              .fontWeight(FontWeight.Medium)
-              .alignSelf(ItemAlign.Start)
-              .margin({ bottom: 10 })
+            Row() {
+              Text('视频显示')
+                .fontSize(16)
+                .fontWeight(FontWeight.Medium)
+                .layoutWeight(1)
 
-            Stack() {
-              // 视频渲染组件
-              // XComponent({
-              //   id: 'videoCanvas',
-              //   type: 'surface',
-              //   libraryname: 'entry'
-              // })
-              //   .width('100%')
-              //   .height(200)
-              //   .backgroundColor('#000000')
-              //   .borderRadius(8)
-              //   .onLoad((event) => {
-              //     this.addLog('视频画布加载完成');
-              //   })
-              //   .onDestroy(() => {
-              //     this.addLog('视频画布销毁');
-              //   })
-
-              // 播放状态指示
-              Column() {
-                if (this.isStreaming) {
-                  Text('🔴 LIVE')
-                    .fontSize(16)
-                    .fontColor('#ef4444')
-                    .fontWeight(FontWeight.Bold)
-
-                  Text(`帧数: ${this.frameCount}`)
-                    .fontSize(12)
-                    .fontColor('#d1d5db')
-                    .margin({ top: 3 })
-
-                  Text(`帧率: ${this.frameRate.toFixed(1)} fps`)
-                    .fontSize(12)
-                    .fontColor('#d1d5db')
-                    .margin({ top: 2 })
-                } else {
-                  Text('⏸️ 未播放')
-                    .fontSize(16)
-                    .fontColor('#9ca3af')
-                }
-
-                Text(this.streamInfo)
-                  .fontSize(12)
-                  .fontColor('#d1d5db')
-                  .margin({ top: 5 })
-                  .maxLines(2)
-                  .textOverflow({ overflow: TextOverflow.Ellipsis })
-              }
-              .alignItems(HorizontalAlign.Center)
-            }
-            .alignContent(Alignment.Center)
-          }
-          .width('100%')
-          .padding(15)
-          .backgroundColor(Color.White)
-          .borderRadius(10)
-          .margin({ bottom: 15 })
-
-          // 日志区域
-          Column() {
-            Text('运行日志')
-              .fontSize(16)
-              .fontWeight(FontWeight.Medium)
-              .alignSelf(ItemAlign.Start)
-              .margin({ bottom: 10 })
-
-            Scroll() {
-              Column() {
-                if (this.logs.length > 0) {
-                  ForEach(this.logs, (log: string) => {
-                    Text(log)
-                      .fontSize(12)
-                      .fontColor('#374151')
-                      .alignSelf(ItemAlign.Start)
-                      .width('100%')
-                      .padding({ top: 2, bottom: 2 })
-                  })
-                } else {
-                  Text('暂无日志')
-                    .fontSize(12)
-                    .fontColor('#9ca3af')
-                    .textAlign(TextAlign.Center)
-                    .width('100%')
-                    .padding(10)
-                }
-              }
-              .width('100%')
+              Text(this.surfaceId ? `Surface: ${this.surfaceId.substring(0, 8)}...` : 'Surface: 未初始化')
+                .fontSize(12)
+                .fontColor(this.surfaceId ? '#10b981' : '#ef4444')
             }
             .width('100%')
-            .height(150)
-            .backgroundColor('#f9fafb')
-            .borderRadius(6)
-            .padding(10)
+            .margin({ bottom: 10 })
+
+            // 视频渲染组件XComponent
+            XComponent({
+              type: XComponentType.SURFACE,
+              controller: this.xComponentController
+            })
+              .width('100%')
+              .height(200)
+              .backgroundColor('#000000')
+              .borderRadius(8)
+
+            // 播放状态指示 - 移到视频下方
+            Row() {
+              if (this.isStreaming) {
+                Text('🔴 LIVE')
+                  .fontSize(14)
+                  .fontColor('#ef4444')
+                  .fontWeight(FontWeight.Bold)
+
+                Text(`帧数: ${this.frameCount}`)
+                  .fontSize(12)
+                  .fontColor('#6b7280')
+                  .margin({ left: 15 })
+
+                Text(`帧率: ${this.frameRate.toFixed(1)} fps`)
+                  .fontSize(12)
+                  .fontColor('#6b7280')
+                  .margin({ left: 10 })
+              } else {
+                Text('⏸️ 未播放')
+                  .fontSize(14)
+                  .fontColor('#9ca3af')
+              }
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Start)
+            .alignItems(VerticalAlign.Center)
+            .margin({ top: 8 })
+
+            // 流信息显示
+            if (this.streamInfo && this.streamInfo !== 'No stream') {
+              Text(this.streamInfo)
+                .fontSize(11)
+                .fontColor('#9ca3af')
+                .margin({ top: 4 })
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+            }
           }
           .width('100%')
           .padding(15)
           .backgroundColor(Color.White)
           .borderRadius(10)
           .margin({ bottom: 15 })
+
         }
         .width('100%')
         .padding(15)

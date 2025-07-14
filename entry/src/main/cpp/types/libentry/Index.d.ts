@@ -25,7 +25,18 @@ export interface FrameStats {
   frameRate: number;
 }
 
-export const startVideoStream: (url: string) => VideoStreamResult;
+type XComponentContextStatus = {
+  hasDraw: boolean,
+  hasChangeColor: boolean,
+};
+
+export const startVideoStream: (url: string, surfaceId: bigint) => VideoStreamResult;
 export const stopVideoStream: (url: string) => boolean;
 export const getStreamStatus: (url: string) => StreamStatus;
 export const getFrameStats: (url: string) => FrameStats;
+export const updateVideoSurfaceSize: (surfaceId: bigint, width: number, height: number) => boolean;
+
+export const setSurfaceId: (id: bigint) => any;
+export const changeSurface: (id: bigint, w: number, h: number) => any;
+export const getXComponentStatus: (id: bigint) => XComponentContextStatus;
+export const destroySurface: (id: bigint) => any;
