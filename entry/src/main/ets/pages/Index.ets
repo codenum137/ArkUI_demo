@@ -17,18 +17,18 @@ class MyXComponentController extends XComponentController{
     this.parentComponent = parent;
   }
 
-  onSurfaceCreated(surfaceId: string): void {
+  onSurfaceCreated = (surfaceId: string): void => {
     console.log(`onSurfaceCreated surfaceId: ${surfaceId}`);
     videoStreamNapi.setSurfaceId(BigInt(surfaceId));
     if (this.parentComponent) {
       this.parentComponent.setSurfaceId(surfaceId);
     }
   }
-  onSurfaceChanged(surfaceId: string, rect: SurfaceRect): void {
+  onSurfaceChanged = (surfaceId: string, rect: SurfaceRect): void => {
     console.log(`onSurfaceChanged surfaceId: ${surfaceId}, rect: ${JSON.stringify(rect)}}`);
     videoStreamNapi.changeSurface(BigInt(surfaceId), rect.surfaceWidth, rect.surfaceHeight);
   }
-  onSurfaceDestroyed(surfaceId: string): void {
+  onSurfaceDestroyed = (surfaceId: string): void => {
     console.log(`onSurfaceDestroyed surfaceId: ${surfaceId}`);
     videoStreamNapi.destroySurface(BigInt(surfaceId));
     if (this.parentComponent) {
@@ -40,8 +40,8 @@ class MyXComponentController extends XComponentController{
 @Entry
 @Component
 struct Index {
-  // @State streamUrl: string = 'rtsp://77.110.228.219/axis-media/media.amp';
-  @State streamUrl: string ='rtsp://10.129.177.159:8554/mystream';
+  @State streamUrl: string = 'rtsp://10.29.237.55:8554/stream';
+  // @State streamUrl: string ='rtsp://10.129.177.159:8554/mystream';
   @State isStreaming: boolean = false;
   @State streamInfo: string = 'No stream';
   @State frameCount: number = 0;
@@ -138,7 +138,7 @@ struct Index {
         // 如果还在播放，3秒后再次检查
         setTimeout((): void => {
           this.checkStreamStatus();
-        }, 3000);
+        }, 10000);
       } else {
         this.addLog('流未在播放状态');
       }
@@ -248,43 +248,43 @@ struct Index {
               .borderRadius(8)
 
             // 播放状态指示 - 移到视频下方
-            Row() {
-              if (this.isStreaming) {
-                Text('🔴 LIVE')
-                  .fontSize(14)
-                  .fontColor('#ef4444')
-                  .fontWeight(FontWeight.Bold)
-
-                Text(`帧数: ${this.frameCount}`)
-                  .fontSize(12)
-                  .fontColor('#6b7280')
-                  .margin({ left: 15 })
-
-                Text(`帧率: ${this.frameRate.toFixed(1)} fps`)
-                  .fontSize(12)
-                  .fontColor('#6b7280')
-                  .margin({ left: 10 })
-              } else {
-                Text('⏸️ 未播放')
-                  .fontSize(14)
-                  .fontColor('#9ca3af')
-              }
-            }
-            .width('100%')
-            .justifyContent(FlexAlign.Start)
-            .alignItems(VerticalAlign.Center)
-            .margin({ top: 8 })
+            // Row() {
+            //   if (this.isStreaming) {
+            //     Text('🔴 LIVE')
+            //       .fontSize(14)
+            //       .fontColor('#ef4444')
+            //       .fontWeight(FontWeight.Bold)
+            //
+            //     Text(`帧数: ${this.frameCount}`)
+            //       .fontSize(12)
+            //       .fontColor('#6b7280')
+            //       .margin({ left: 15 })
+            //
+            //     Text(`帧率: ${this.frameRate.toFixed(1)} fps`)
+            //       .fontSize(12)
+            //       .fontColor('#6b7280')
+            //       .margin({ left: 10 })
+            //   } else {
+            //     Text('⏸️ 未播放')
+            //       .fontSize(14)
+            //       .fontColor('#9ca3af')
+            //   }
+            // }
+            // .width('100%')
+            // .justifyContent(FlexAlign.Start)
+            // .alignItems(VerticalAlign.Center)
+            // .margin({ top: 8 })
 
             // 流信息显示
-            if (this.streamInfo && this.streamInfo !== 'No stream') {
-              Text(this.streamInfo)
-                .fontSize(11)
-                .fontColor('#9ca3af')
-                .margin({ top: 4 })
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-            }
+            // if (this.streamInfo && this.streamInfo !== 'No stream') {
+            //   Text(this.streamInfo)
+            //     .fontSize(11)
+            //     .fontColor('#9ca3af')
+            //     .margin({ top: 4 })
+            //     .maxLines(2)
+            //     .textOverflow({ overflow: TextOverflow.Ellipsis })
+            //     .width('100%')
+            // }
           }
           .width('100%')
           .padding(15)
