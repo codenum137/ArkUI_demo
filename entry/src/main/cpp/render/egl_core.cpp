@@ -606,10 +606,10 @@ bool EGLCore::UpdateYUVTextures(const VideoFrame &frame) {
     }
 
     // 添加数据验证
-    OH_LOG_Print(
-        LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
-        "UpdateYUVTextures: %{public}dx%{public}d, Y_linesize=%{public}d, U_linesize=%{public}d, V_linesize=%{public}d",
-        frame.width, frame.height, frame.linesize[0], frame.linesize[1], frame.linesize[2]);
+//    OH_LOG_Print(
+//        LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+//        "UpdateYUVTextures: %{public}dx%{public}d, Y_linesize=%{public}d, U_linesize=%{public}d, V_linesize=%{public}d",
+//        frame.width, frame.height, frame.linesize[0], frame.linesize[1], frame.linesize[2]);
 
     // Clear any existing OpenGL errors
     while (glGetError() != GL_NO_ERROR) {

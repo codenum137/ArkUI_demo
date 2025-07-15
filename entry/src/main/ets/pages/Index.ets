@@ -41,13 +41,14 @@ class MyXComponentController extends XComponentController{
 @Component
 struct Index {
   @State streamUrl: string = 'rtsp://10.29.237.55:8554/stream';
-  // @State streamUrl: string ='rtsp://10.129.177.159:8554/mystream';
+  // @State streamUrl: string ='rtsp://77.110.228.219/axis-media/media.amp';
   @State isStreaming: boolean = false;
   @State streamInfo: string = 'No stream';
   @State frameCount: number = 0;
   @State frameRate: number = 0;
   @State surfaceId: string = '';
   xComponentController: MyXComponentController = new MyXComponentController();
+  private statusTimer: number = -1;
 
   aboutToAppear(): void {
     this.xComponentController.setParent(this);
@@ -84,10 +85,7 @@ struct Index {
 
       if (result.success) {
         this.addLog(`流启动成功: ${this.streamUrl}`);
-        // 延迟1秒后开始检查状态，让C++端有时间建立连接
-        setTimeout(() => {
-          this.checkStreamStatus();
-        }, 1000);
+        this.startStatusPolling();
       } else {
         this.addLog(`启动流失败: ${this.streamUrl}`);
       }
@@ -110,6 +108,7 @@ struct Index {
         this.frameCount = 0;
         this.frameRate = 0;
         this.addLog(`停止播放流: ${this.streamUrl}`);
+        this.stopStatusPolling();
       } else {
         this.addLog(`停止流失败: ${this.streamUrl}`);
       }
@@ -118,32 +117,67 @@ struct Index {
     }
   }
 
+  startStatusPolling(): void {
+    this.stopStatusPolling(); // 先清除旧的计时器，以防万一
+    // 延迟1秒后开始，让C++端有时间建立连接
+    setTimeout(() => {
+      this.checkStreamStatus(); // 立即执行一次
+      // 然后设置定时器，以3秒为间隔重复执行
+      this.statusTimer = setInterval(() => {
+        this.checkStreamStatus();
+      }, 3000);
+    }, 1000);
+  }
+
+  stopStatusPolling(): void {
+    if (this.statusTimer !== -1) {
+      clearInterval(this.statusTimer);
+      this.statusTimer = -1;
+      this.addLog('状态检查计时器已停止');
+    }
+  }
+
   checkStreamStatus(): void {
-    if (!this.streamUrl.trim()) return;
+    if (!this.streamUrl.trim()) {
+      this.stopStatusPolling(); // 如果URL为空，停止轮询
+      return;
+    }
 
     try {
       const status = videoStreamNapi.getStreamStatus(this.streamUrl);
       this.addLog(`状态检查: isStreaming=${status.isStreaming}, info=${status.info}`);
-      
-      this.isStreaming = status.isStreaming;
-      this.streamInfo = status.info;
 
-      // 获取真实的帧统计信息
-      if (this.isStreaming) {
+      // Case 1: Stream is currently running.
+      if (status.isStreaming) {
+        this.isStreaming = true; // Ensure UI state is true
+        this.streamInfo = status.info;
+
         const frameStats = videoStreamNapi.getFrameStats(this.streamUrl);
         this.frameCount = frameStats.frameCount;
         this.frameRate = frameStats.frameRate;
         this.addLog(`帧统计: count=${this.frameCount}, rate=${this.frameRate.toFixed(1)}fps`);
-
-        // 如果还在播放，3秒后再次检查
-        setTimeout((): void => {
-          this.checkStreamStatus();
-        }, 10000);
-      } else {
-        this.addLog('流未在播放状态');
+      } 
+      // Case 2: Stream is NOT currently running.
+      else {
+        // Sub-case 2a: It WAS running before, but has now stopped.
+        if (this.isStreaming) {
+          this.addLog('流连接已断开，停止轮询。');
+          this.isStreaming = false; // Update UI state
+          this.streamInfo = 'Stream stopped';
+          this.frameCount = 0;
+          this.frameRate = 0;
+          this.stopStatusPolling(); // Stop the timer
+        } 
+        // Sub-case 2b: It was not running before, and is still not running.
+        else {
+          // This is the "connecting" phase. Do nothing and let the timer try again.
+          this.addLog('正在等待流连接建立...');
+          this.streamInfo = status.info; // Update info text even while connecting
+        }
       }
     } catch (error) {
       this.addLog(`检查流状态异常: ${error}`);
+      this.stopStatusPolling(); // Stop polling on any error
     }
   }
 

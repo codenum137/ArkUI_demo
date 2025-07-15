@@ -113,7 +113,7 @@ void VideoStreamHandler::streamThread() {
 
     OH_LOG_INFO(LOG_APP, "Decoder setup successfully");
     isStreaming_ = true;
-
+    
     // 分配帧内存
     frame_ = av_frame_alloc();
     packet_ = av_packet_alloc();
@@ -167,7 +167,7 @@ void VideoStreamHandler::streamThread() {
     currentFrameRate_ = frameRate_;
 
     cleanup();
-    isStreaming_ = false;
+    // isStreaming_ = false;
 }
 
 bool VideoStreamHandler::openInputStream(const std::string &url) {
