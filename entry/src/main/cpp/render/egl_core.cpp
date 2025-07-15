@@ -241,13 +241,13 @@ bool LoadYUVFromRawfile(VideoFrame &frame) {
 /**
  * YUV420 to RGB vertex shader.
  */
-const char YUV_VERTEX_SHADER[] = "#version 300 es\n"
-                                 "layout(location = 0) in vec2 a_position;\n"
-                                 "layout(location = 1) in vec2 a_texCoord;\n"
-                                 "out vec2 v_texCoord;\n"
-                                 "void main() {\n"
-                                 "    gl_Position = vec4(a_position,0.0,1.0);\n"
-                                 "    v_texCoord = a_texCoord;\n"
+const char YUV_VERTEX_SHADER[] = "#version 300 es\n"\
+                                 "layout(location = 0) in vec2 a_position;\n"\
+                                 "layout(location = 1) in vec2 a_texCoord;\n"\
+                                 "out vec2 v_texCoord;\n"\
+                                 "void main() {\n"\
+                                 "    gl_Position = vec4(a_position,0.0,1.0);\n"\
+                                 "    v_texCoord = a_texCoord;\n"\
                                  "}\n";
 
 
@@ -435,11 +435,11 @@ bool EGLCore::InitYUVTextures() {
     const GLubyte *renderer = glGetString(GL_RENDERER); // 获取渲染器名称（如GPU型号）
     OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "GL_VERSION: %{public}s, GL_RENDERER:%{public}s",
                  version, renderer);
-    // Generate and bind VAO
+    // Generate and bind VAO，记录VBO中的数据如何组织
     glGenVertexArrays(1, &VAO_);
     glBindVertexArray(VAO_);
 
-    // Generate and bind VBO
+    // Generate and bind VBO，将矩形四个顶点坐标上传到GPU显存
     glGenBuffers(1, &VBO_);
     glBindBuffer(GL_ARRAY_BUFFER, VBO_);
     glBufferData(GL_ARRAY_BUFFER, sizeof(QUAD_VERTICES), QUAD_VERTICES, GL_STATIC_DRAW);
@@ -508,16 +508,21 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
     }
 
     // 检查是否已经渲染了第一帧，如果是则跳过后续帧的渲染
-    if (firstFrameRendered_) {
-        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
-                     "First frame already rendered, skipping subsequent frames");
-        return true; // 返回true表示"成功"，但实际上跳过了渲染
-    }
+//    if (firstFrameRendered_) {
+//        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+//                     "First frame already rendered, skipping subsequent frames");
+//        return true; // 返回true表示"成功"，但实际上跳过了渲染
+//    }
 
-    // 打印第一帧的详细数据
-    // if (frame.data[0] != nullptr) {
-    //     PrintFirstFrameDataAndExit(frame);
-    // }
+     //todo test 直接使用自生成的帧进行测试
+     // LoadYUVFromRawfile(frame);
+    
+      // 打印第一帧的详细数据
+//     if (frame.data[0] != nullptr) {
+//         PrintFirstFrameDataAndExit(frame);
+//     }
+    
+    
 
     // 确保EGL上下文是当前的
     if (!eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
@@ -571,13 +576,13 @@ bool EGLCore::RenderYUVFrame(const VideoFrame &frame) {
     }
 
     // 标记第一帧已经渲染完成
-    if (!firstFrameRendered_) {
-        firstFrameRendered_ = true;
-        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
-                     "First frame rendered successfully. Subsequent frames will be skipped.");
-    }
+//    if (!firstFrameRendered_) {
+//        firstFrameRendered_ = true;
+//        OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+//                     "First frame rendered successfully. Subsequent frames will be skipped.");
+//    }
 
-    // OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Frame rendered successfully to surface");
+    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "Frame rendered successfully to surface");
     return true;
 }
 
@@ -616,6 +621,19 @@ bool EGLCore::UpdateYUVTextures(const VideoFrame &frame) {
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &oldUnpackAlignment);
     glGetIntegerv(GL_UNPACK_ROW_LENGTH, &oldUnpackRowLength);
 
+//    // Update Y texture with linesize padding handling
+//    glActiveTexture(GL_TEXTURE0);
+//    if (!CheckGLError("glActiveTexture(GL_TEXTURE0)"))
+//        return false;
+//
+//    glBindTexture(GL_TEXTURE_2D, yTexture_);
+//    if (!CheckGLError("glBindTexture Y texture"))
+//        return false;
+
+    // 设置像素存储参数来处理linesize填充
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);                  // 字节对齐
+    
+    
     // Update Y texture with linesize padding handling
     glActiveTexture(GL_TEXTURE0);
     if (!CheckGLError("glActiveTexture(GL_TEXTURE0)"))
@@ -624,11 +642,9 @@ bool EGLCore::UpdateYUVTextures(const VideoFrame &frame) {
     glBindTexture(GL_TEXTURE_2D, yTexture_);
     if (!CheckGLError("glBindTexture Y texture"))
         return false;
-
-    // 设置像素存储参数来处理linesize填充
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);                  // 字节对齐
+    
     glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.linesize[0]); // 设置行长度为linesize
-
+    
     glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE, frame.width, frame.height, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,
                  frame.data[0]);
     if (!CheckGLError("Y texture glTexImage2D with linesize"))
