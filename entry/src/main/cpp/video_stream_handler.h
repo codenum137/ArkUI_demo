@@ -1,6 +1,10 @@
 #ifndef VIDEO_STREAM_HANDLER_H
 #define VIDEO_STREAM_HANDLER_H
 
+#include "hilog/log.h"
+#include "libavutil/channel_layout.h"
+#include <ohaudio/native_audiostreambuilder.h>
+#include <ohaudio/native_audiorenderer.h>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -13,6 +17,7 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/avutil.h>
 #include <libavutil/imgutils.h>
+#include <libswresample/swresample.h>
 }
 
 struct VideoFrame {
@@ -27,27 +32,19 @@ class VideoStreamHandler {
 public:
     using FrameCallback = std::function<void(const VideoFrame &)>;
     using ErrorCallback = std::function<void(const std::string &)>;
+    using AudioCallback = std::function<OH_AudioData_Callback_Result(OH_AudioRenderer *, void *, void *, int32_t)>;
 
     VideoStreamHandler();
     ~VideoStreamHandler();
 
-    // 设置回调函数
     void setFrameCallback(FrameCallback callback);
     void setErrorCallback(ErrorCallback callback);
 
-    // 开始播放流
     bool startStream(const std::string &url);
-
-    // 停止播放流
     void stopStream();
 
-    // 获取流状态
     bool isStreaming() const;
-
-    // 获取流信息
     std::string getStreamInfo() const;
-
-    // 获取帧统计信息
     int getFrameCount() const;
     double getCurrentFrameRate() const;
 
@@ -56,35 +53,61 @@ private:
     void cleanup();
     bool initializeFFmpeg();
     bool openInputStream(const std::string &url);
-    bool setupDecoder();
-    bool processFrame(AVFrame *frame);
+    bool setupVideoDecoder();
+    bool setupAudioDecoder();
+    bool processVideoFrame(AVFrame *frame);
+    bool processAudioFrame(AVFrame *frame);
 
-    // FFmpeg 相关
+    // FFmpeg - General
     AVFormatContext *formatContext_;
-    AVCodecContext *codecContext_;
-    const AVCodec *codec_;
     AVFrame *frame_;
     AVPacket *packet_;
 
+    // FFmpeg - Video
+    AVCodecContext *videoCodecContext_;
+    const AVCodec *videoCodec_;
     int videoStreamIndex_;
 
-    // 线程和状态管理
+    // FFmpeg - Audio
+    AVCodecContext *audioCodecContext_;
+    const AVChannelLayout out_ch_layout = AV_CHANNEL_LAYOUT_2_2;
+    const AVCodec *audioCodec_;
+    SwrContext *swrContext_;
+    int audioStreamIndex_;
+    uint8_t *audioBuffer_;
+    uint8_t *buffer;
+    int audioBufferSize_;
+    
+    OH_AudioRenderer *audioRenderer_;
+
+    // Thread and State Management
     std::thread streamThread_;
     std::atomic<bool> isStreaming_;
     std::atomic<bool> shouldStop_;
     std::mutex callbackMutex_;
+    std::mutex streamMutex_;
 
-    // 回调函数
+    // Callbacks
     FrameCallback frameCallback_;
     ErrorCallback errorCallback_;
+    AudioCallback audioCallback_;
+     static OH_AudioData_Callback_Result write_callback(OH_AudioRenderer *render, void* userData, void *buffer, int32_t bufferLen){
+        memcpy(buffer, userData, bufferLen);
+        return AUDIO_DATA_CALLBACK_RESULT_VALID;
+    }
+    static int32_t error_callback(OH_AudioRenderer* renderer, void* userData, OH_AudioStream_Result error){
+    // 根据error表示的音频异常信息，做出相应的处理
+    OH_LOG_ERROR(LOG_APP, "Audio process error : %d ", error);
+    return 0;
+    }
 
-    // 流信息
+    // Stream Info
     std::string streamUrl_;
     int frameWidth_;
     int frameHeight_;
     double frameRate_;
 
-    // 帧统计
+    // Frame Stats
     std::atomic<int> frameCount_;
     std::atomic<double> currentFrameRate_;
 };

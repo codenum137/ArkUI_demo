@@ -1,6 +1,7 @@
 #include "video_stream_handler.h"
-#include "hilog/log.h"
+
 #include <chrono>
+#include <cstddef>
 #include <thread>
 
 #undef LOG_DOMAIN
@@ -8,372 +9,313 @@
 #define LOG_DOMAIN 0x3200
 #define LOG_TAG "VideoStreamHandler"
 
-
+// Constructor: Initialize all member variables to a safe default state.
 VideoStreamHandler::VideoStreamHandler()
-    : formatContext_(nullptr), codecContext_(nullptr), codec_(nullptr), frame_(nullptr), packet_(nullptr),
-      videoStreamIndex_(-1), isStreaming_(false), shouldStop_(false), frameWidth_(0), frameHeight_(0), frameRate_(0.0),
-      frameCount_(0), currentFrameRate_(0.0) {
+    : formatContext_(nullptr), frame_(nullptr), packet_(nullptr), videoCodecContext_(nullptr), videoCodec_(nullptr),
+      videoStreamIndex_(-1), audioCodecContext_(nullptr), audioCodec_(nullptr), swrContext_(nullptr),
+      audioStreamIndex_(-1), audioBuffer_(nullptr), audioBufferSize_(0), audioRenderer_(nullptr), isStreaming_(false),
+      shouldStop_(false), frameWidth_(0), frameHeight_(0), frameRate_(0.0), frameCount_(0), currentFrameRate_(0.0) {
     initializeFFmpeg();
 }
 
-VideoStreamHandler::~VideoStreamHandler() {
-    stopStream();
-    cleanup();
-}
+// Destructor: Ensure stopStream is called to clean up resources.
+VideoStreamHandler::~VideoStreamHandler() { stopStream(); }
 
+// Initialize FFmpeg network capabilities.
 bool VideoStreamHandler::initializeFFmpeg() {
-    // FFmpeg 4.0+ 不再需要 av_register_all()
     avformat_network_init();
     return true;
 }
 
+// Set the callback function for video frames.
 void VideoStreamHandler::setFrameCallback(FrameCallback callback) {
     std::lock_guard<std::mutex> lock(callbackMutex_);
     frameCallback_ = callback;
-    OH_LOG_INFO(LOG_APP, "Frame callback set successfully");
 }
 
+// Set the callback function for errors.
 void VideoStreamHandler::setErrorCallback(ErrorCallback callback) {
     std::lock_guard<std::mutex> lock(callbackMutex_);
     errorCallback_ = callback;
 }
 
-bool VideoStreamHandler::startStream(const std::string &url) {
-    OH_LOG_INFO(LOG_APP, "VideoStreamHandler::startStream called with URL: %{public}s", url.c_str());
 
+
+// Start the stream processing in a new thread.
+bool VideoStreamHandler::startStream(const std::string &url) {
+    std::lock_guard<std::mutex> lock(streamMutex_);
     if (isStreaming_) {
-        OH_LOG_WARN(LOG_APP, "Stream already running");
+        OH_LOG_WARN(LOG_APP, "Stream is already running, start request ignored.");
         return false;
     }
-
+    if (streamThread_.joinable()) {
+        streamThread_.join();
+    }
     streamUrl_ = url;
     shouldStop_ = false;
     frameCount_ = 0;
     currentFrameRate_ = 0.0;
-
-    // 在新线程中开始流处理
     try {
         streamThread_ = std::thread(&VideoStreamHandler::streamThread, this);
-        OH_LOG_INFO(LOG_APP, "Stream thread started successfully");
         return true;
     } catch (const std::exception &e) {
-        OH_LOG_ERROR(LOG_APP, "Failed to start stream thread: %{public}s", e.what());
+        OH_LOG_ERROR(LOG_APP, "Failed to create stream thread: %{public}s", e.what());
         return false;
     }
 }
 
+// Stop the stream processing.
 void VideoStreamHandler::stopStream() {
-    if (!isStreaming_) {
+    std::lock_guard<std::mutex> lock(streamMutex_);
+    if (!isStreaming_ && !streamThread_.joinable()) {
         return;
     }
-
     shouldStop_ = true;
-
     if (streamThread_.joinable()) {
         streamThread_.join();
     }
-
     cleanup();
     isStreaming_ = false;
 }
 
-bool VideoStreamHandler::isStreaming() const { return isStreaming_; }
+bool VideoStreamHandler::isStreaming() const { return isStreaming_.load(); }
 
 std::string VideoStreamHandler::getStreamInfo() const {
     if (!isStreaming_) {
         return "Not streaming";
     }
-
     return "URL: " + streamUrl_ + ", Resolution: " + std::to_string(frameWidth_) + "x" + std::to_string(frameHeight_) +
            ", FPS: " + std::to_string(frameRate_);
-}
-
-void VideoStreamHandler::streamThread() {
-    OH_LOG_INFO(LOG_APP, "Stream thread started for URL: %{public}s", streamUrl_.c_str());
-
-    // 打开流
-    if (!openInputStream(streamUrl_)) {
-        OH_LOG_ERROR(LOG_APP, "Failed to open input stream: %{public}s", streamUrl_.c_str());
-        std::lock_guard<std::mutex> lock(callbackMutex_);
-        if (errorCallback_) {
-            errorCallback_("Failed to open input stream: " + streamUrl_);
-        }
-        return;
-    }
-
-    // 设置解码器
-    if (!setupDecoder()) {
-        OH_LOG_ERROR(LOG_APP, "Failed to setup decoder");
-        std::lock_guard<std::mutex> lock(callbackMutex_);
-        if (errorCallback_) {
-            errorCallback_("Failed to setup decoder");
-        }
-        return;
-    }
-
-    OH_LOG_INFO(LOG_APP, "Decoder setup successfully");
-    isStreaming_ = true;
-    
-    // 分配帧内存
-    frame_ = av_frame_alloc();
-    packet_ = av_packet_alloc();
-
-    if (!frame_ || !packet_) {
-        std::lock_guard<std::mutex> lock(callbackMutex_);
-        if (errorCallback_) {
-            errorCallback_("Failed to allocate frame memory");
-        }
-        return;
-    }
-
-    OH_LOG_INFO(LOG_APP, "Starting main decode loop...");
-    int frameCount = 0;
-
-    // 主循环
-    while (!shouldStop_) {
-        int ret = av_read_frame(formatContext_, packet_);
-        if (ret >= 0) {
-            if (packet_->stream_index == videoStreamIndex_) {
-                // 发送数据包到解码器
-                if (avcodec_send_packet(codecContext_, packet_) >= 0) {
-                    // 接收解码后的帧
-                    while (avcodec_receive_frame(codecContext_, frame_) >= 0) {
-                        processFrame(frame_);
-                        frameCount_++;
-                        if (frameCount_ % 30 == 0) { // 每30帧输出一次日志
-                            OH_LOG_INFO(LOG_APP, "Processed %{public}d frames", frameCount_.load());
-                        }
-                    }
-                }
-            }
-            av_packet_unref(packet_);
-        } else {
-            // 读取失败，可能是流结束或网络错误
-            if (ret == AVERROR_EOF) {
-                OH_LOG_INFO(LOG_APP, "End of stream reached");
-                break;
-            } else {
-                char error_str[AV_ERROR_MAX_STRING_SIZE];
-                av_strerror(ret, error_str, AV_ERROR_MAX_STRING_SIZE);
-                OH_LOG_WARN(LOG_APP, "av_read_frame failed: %{public}s", error_str);
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-    }
-
-    OH_LOG_INFO(LOG_APP, "Main loop ended, processed %{public}d frames total", frameCount_.load());
-
-    // 更新当前帧率
-    currentFrameRate_ = frameRate_;
-
-    cleanup();
-    // isStreaming_ = false;
-}
-
-bool VideoStreamHandler::openInputStream(const std::string &url) {
-    OH_LOG_INFO(LOG_APP, "Opening input stream: %{public}s", url.c_str());
-
-    formatContext_ = avformat_alloc_context();
-    if (!formatContext_) {
-        OH_LOG_ERROR(LOG_APP, "Failed to allocate format context");
-        return false;
-    }
-
-    // 设置选项用于RTSP/RTP
-    AVDictionary *options = nullptr;
-    av_dict_set(&options, "rtsp_transport", "tcp", 0);
-    av_dict_set(&options, "stimeout", "5000000", 0); // 5秒超时
-    av_dict_set(&options, "user_agent", "FFmpeg/VideoStream", 0);
-    av_dict_set(&options, "max_delay", "500000", 0); // 最大延迟500ms
-
-    // 打开流
-    OH_LOG_INFO(LOG_APP, "Attempting to open input with avformat_open_input...");
-    int ret = avformat_open_input(&formatContext_, url.c_str(), nullptr, &options);
-    if (ret != 0) {
-        char error_str[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, error_str, AV_ERROR_MAX_STRING_SIZE);
-        OH_LOG_ERROR(LOG_APP, "avformat_open_input failed with error code %{public}d: %{public}s", ret, error_str);
-        av_dict_free(&options);
-        avformat_free_context(formatContext_);
-        formatContext_ = nullptr;
-        return false;
-    }
-
-    av_dict_free(&options);
-    OH_LOG_INFO(LOG_APP, "avformat_open_input succeeded");
-
-    // 寻找流信息
-    OH_LOG_INFO(LOG_APP, "Finding stream info...");
-    ret = avformat_find_stream_info(formatContext_, nullptr);
-    if (ret < 0) {
-        char error_str[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, error_str, AV_ERROR_MAX_STRING_SIZE);
-        OH_LOG_ERROR(LOG_APP, "avformat_find_stream_info failed with error code %{public}d: %{public}s", ret,
-                     error_str);
-        return false;
-    }
-
-    OH_LOG_INFO(LOG_APP, "Stream info found, total streams: %{public}u", formatContext_->nb_streams);
-
-    // 查找视频流
-    videoStreamIndex_ = -1;
-    for (unsigned int i = 0; i < formatContext_->nb_streams; i++) {
-        OH_LOG_INFO(LOG_APP, "Stream %{public}u: codec_type = %{public}d", i,
-                    formatContext_->streams[i]->codecpar->codec_type);
-        if (formatContext_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-            videoStreamIndex_ = i;
-            OH_LOG_INFO(LOG_APP, "Found video stream at index %{public}d", videoStreamIndex_);
-            break;
-        }
-    }
-
-    if (videoStreamIndex_ == -1) {
-        OH_LOG_ERROR(LOG_APP, "No video stream found in the input");
-        return false;
-    }
-
-    OH_LOG_INFO(LOG_APP, "Input stream opened successfully, video stream index: %{public}d", videoStreamIndex_);
-    return true;
-}
-
-bool VideoStreamHandler::setupDecoder() {
-    OH_LOG_INFO(LOG_APP, "Setting up decoder for video stream %{public}d", videoStreamIndex_);
-
-    AVCodecParameters *codecpar = formatContext_->streams[videoStreamIndex_]->codecpar;
-
-    // 详细的编解码器信息日志
-    OH_LOG_INFO(LOG_APP, "Codec ID: %{public}d, width: %{public}d, height: %{public}d", codecpar->codec_id,
-                codecpar->width, codecpar->height);
-    OH_LOG_INFO(LOG_APP, "Pixel format: %{public}d, bit rate: %{public}ld, sample aspect ratio: %{public}d/%{public}d",
-                codecpar->format, codecpar->bit_rate, codecpar->sample_aspect_ratio.num,
-                codecpar->sample_aspect_ratio.den);
-
-    // 输出像素格式名称
-    const char *pix_fmt_name = av_get_pix_fmt_name((enum AVPixelFormat)codecpar->format);
-    OH_LOG_INFO(LOG_APP, "Pixel format name: %{public}s", pix_fmt_name ? pix_fmt_name : "unknown");
-
-    // 查找解码器
-    codec_ = avcodec_find_decoder(codecpar->codec_id);
-    if (!codec_) {
-        OH_LOG_ERROR(LOG_APP, "Decoder not found for codec ID: %{public}d", codecpar->codec_id);
-        return false;
-    }
-
-    OH_LOG_INFO(LOG_APP, "Found decoder: %{public}s", codec_->name);
-
-    // 分配解码器上下文
-    codecContext_ = avcodec_alloc_context3(codec_);
-    if (!codecContext_) {
-        OH_LOG_ERROR(LOG_APP, "Failed to allocate codec context");
-        return false;
-    }
-
-    // 从流参数复制到解码器上下文
-    int ret = avcodec_parameters_to_context(codecContext_, codecpar);
-    if (ret < 0) {
-        char error_str[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, error_str, AV_ERROR_MAX_STRING_SIZE);
-        OH_LOG_ERROR(LOG_APP, "Failed to copy codec parameters: %{public}s", error_str);
-        return false;
-    }
-
-    // 打开解码器
-    ret = avcodec_open2(codecContext_, codec_, nullptr);
-    if (ret < 0) {
-        char error_str[AV_ERROR_MAX_STRING_SIZE];
-        av_strerror(ret, error_str, AV_ERROR_MAX_STRING_SIZE);
-        OH_LOG_ERROR(LOG_APP, "Failed to open codec: %{public}s", error_str);
-        return false;
-    }
-
-    frameWidth_ = codecContext_->width;
-    frameHeight_ = codecContext_->height;
-    OH_LOG_INFO(LOG_APP, "Decoder opened successfully, frame size: %{public}dx%{public}d", frameWidth_, frameHeight_);
-
-    // 输出解码器像素格式信息
-    const char *decoder_pix_fmt_name = av_get_pix_fmt_name(codecContext_->pix_fmt);
-    OH_LOG_INFO(LOG_APP, "Decoder pixel format: %{public}d (%{public}s)", codecContext_->pix_fmt,
-                decoder_pix_fmt_name ? decoder_pix_fmt_name : "unknown");
-
-    // 检查是否为YUV420P
-    if (codecContext_->pix_fmt != AV_PIX_FMT_YUV420P) {
-        OH_LOG_WARN(LOG_APP, "Warning: Decoder output format is not YUV420P, may need conversion");
-    }
-
-    // 计算帧率
-    AVRational timeBase = formatContext_->streams[videoStreamIndex_]->time_base;
-    AVRational frameRate = formatContext_->streams[videoStreamIndex_]->r_frame_rate;
-    if (frameRate.num > 0 && frameRate.den > 0) {
-        frameRate_ = av_q2d(frameRate);
-        OH_LOG_INFO(LOG_APP, "Frame rate: %{public}f fps", frameRate_);
-    } else {
-        OH_LOG_WARN(LOG_APP, "Frame rate information not available");
-    }
-
-    return true;
-}
-
-bool VideoStreamHandler::processFrame(AVFrame *frame) {
-    // 详细的帧信息诊断
-    const char *frame_pix_fmt_name = av_get_pix_fmt_name((enum AVPixelFormat)frame->format);
-    OH_LOG_INFO(LOG_APP, "Frame format: %{public}d (%{public}s), key_frame: %{public}d, pict_type: %{public}d",
-                frame->format, frame_pix_fmt_name ? frame_pix_fmt_name : "unknown", frame->key_frame, frame->pict_type);
-
-    // 检查帧数据有效性
-    if (!frame->data[0] || !frame->data[1] || !frame->data[2]) {
-        OH_LOG_ERROR(LOG_APP, "Frame data is NULL! Y=%{public}p, U=%{public}p, V=%{public}p", frame->data[0],
-                     frame->data[1], frame->data[2]);
-        return false;
-    }
-
-    // 创建VideoFrame结构
-    VideoFrame videoFrame;
-    videoFrame.width = frameWidth_;
-    videoFrame.height = frameHeight_;
-    videoFrame.pts = frame->pts;
-
-    // 设置YUV平面数据
-    videoFrame.data[0] = frame->data[0];         // Y平面
-    videoFrame.data[1] = frame->data[1];         // U平面
-    videoFrame.data[2] = frame->data[2];         // V平面
-    videoFrame.linesize[0] = frame->linesize[0]; // Y平面行大小
-    videoFrame.linesize[1] = frame->linesize[1]; // U平面行大小
-    videoFrame.linesize[2] = frame->linesize[2]; // V平面行大小
-
-    // OH_LOG_INFO(LOG_APP, "VideoFrame created: %{public}dx%{public}d, pts=%{public}ld, Y_linesize=%{public}d",
-    //             videoFrame.width, videoFrame.height, static_cast<long>(videoFrame.pts), videoFrame.linesize[0]);
-
-    // 调用回调函数
-    std::lock_guard<std::mutex> lock(callbackMutex_);
-    if (frameCallback_) {
-        frameCallback_(videoFrame);
-    } else {
-        OH_LOG_ERROR(LOG_APP, "No frame callback set!");
-    }
-
-    return true;
-}
-
-void VideoStreamHandler::cleanup() {
-    if (packet_) {
-        av_packet_free(&packet_);
-    }
-
-    if (frame_) {
-        av_frame_free(&frame_);
-    }
-
-    if (codecContext_) {
-        avcodec_free_context(&codecContext_);
-    }
-
-    if (formatContext_) {
-        avformat_close_input(&formatContext_);
-    }
-
-    videoStreamIndex_ = -1;
 }
 
 int VideoStreamHandler::getFrameCount() const { return frameCount_.load(); }
 
 double VideoStreamHandler::getCurrentFrameRate() const { return currentFrameRate_.load(); }
+
+// The main thread for stream processing.
+void VideoStreamHandler::streamThread() {
+    if (!openInputStream(streamUrl_)) {
+        OH_LOG_ERROR(LOG_APP, "Failed to open input stream: %{public}s", streamUrl_.c_str());
+        return;
+    }
+    if (videoStreamIndex_ != -1 && !setupVideoDecoder()) {
+        OH_LOG_ERROR(LOG_APP, "Failed to setup video decoder");
+        cleanup();
+        return;
+    }
+    if (audioStreamIndex_ != -1 && !setupAudioDecoder()) {
+        OH_LOG_ERROR(LOG_APP, "Failed to setup audio decoder");
+        cleanup();
+        return;
+    }
+
+    isStreaming_ = true;
+    frame_ = av_frame_alloc();
+    packet_ = av_packet_alloc();
+    if (!frame_ || !packet_) {
+        OH_LOG_ERROR(LOG_APP, "Failed to allocate frame or packet");
+        isStreaming_ = false;
+        cleanup();
+        return;
+    }
+
+    while (!shouldStop_) {
+        if (av_read_frame(formatContext_, packet_) >= 0) {
+            if (packet_->stream_index == videoStreamIndex_) {
+                if (avcodec_send_packet(videoCodecContext_, packet_) >= 0) {
+                    while (avcodec_receive_frame(videoCodecContext_, frame_) >= 0) {
+                        processVideoFrame(frame_);
+                        frameCount_++;
+                    }
+                }
+            } else if (packet_->stream_index == audioStreamIndex_) {
+                if (avcodec_send_packet(audioCodecContext_, packet_) >= 0) {
+                    while (avcodec_receive_frame(audioCodecContext_, frame_) >= 0) {
+                        processAudioFrame(frame_);
+                    }
+                }
+            }
+            av_packet_unref(packet_);
+        } else {
+            OH_LOG_INFO(LOG_APP, "End of stream or read error, exiting loop.");
+            break;
+        }
+    }
+    isStreaming_ = false; // Set streaming to false before cleanup
+}
+
+// Open the input stream and find video/audio stream indices.
+bool VideoStreamHandler::openInputStream(const std::string &url) {
+    formatContext_ = avformat_alloc_context();
+    AVDictionary *options = nullptr;
+    av_dict_set(&options, "rtsp_transport", "tcp", 0);
+    av_dict_set(&options, "stimeout", "5000000", 0);
+    if (avformat_open_input(&formatContext_, url.c_str(), nullptr, &options) != 0) {
+        OH_LOG_ERROR(LOG_APP, "avformat_open_input failed");
+        av_dict_free(&options);
+        return false;
+    }
+    av_dict_free(&options);
+    if (avformat_find_stream_info(formatContext_, nullptr) < 0) {
+        OH_LOG_ERROR(LOG_APP, "avformat_find_stream_info failed");
+        return false;
+    }
+    videoStreamIndex_ = -1;
+    audioStreamIndex_ = -1;
+    // 遍历所有轨道
+    for (unsigned int i = 0; i < formatContext_->nb_streams; i++) {
+        if (formatContext_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+            videoStreamIndex_ = i;
+        } else if (formatContext_->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO) {
+            audioStreamIndex_ = i;
+        }
+    }
+    if (videoStreamIndex_ == -1) {
+        OH_LOG_ERROR(LOG_APP, "No video stream found");
+        return false;
+    }
+    if (audioStreamIndex_ == -1) {
+        OH_LOG_WARN(LOG_APP, "No audio stream found");
+    }
+    return true;
+}
+
+// Setup the video decoder.
+bool VideoStreamHandler::setupVideoDecoder() {
+    AVCodecParameters *codecpar = formatContext_->streams[videoStreamIndex_]->codecpar;
+    videoCodec_ = avcodec_find_decoder(codecpar->codec_id);
+    if (!videoCodec_) return false;
+    videoCodecContext_ = avcodec_alloc_context3(videoCodec_);
+    if (!videoCodecContext_ || avcodec_parameters_to_context(videoCodecContext_, codecpar) < 0) return false;
+    if (avcodec_open2(videoCodecContext_, videoCodec_, nullptr) < 0) return false;
+    frameWidth_ = videoCodecContext_->width;
+    frameHeight_ = videoCodecContext_->height;
+    frameRate_ = av_q2d(formatContext_->streams[videoStreamIndex_]->r_frame_rate);
+    return true;
+}
+
+static OH_AudioData_Callback_Result NewAudioRendererOnWriteData(
+    OH_AudioRenderer* renderer,
+    void* userData,
+    void* audioData,
+    int32_t audioDataSize)
+{
+    
+    
+    
+    return AUDIO_DATA_CALLBACK_RESULT_VALID;
+}
+
+bool VideoStreamHandler::setupAudioDecoder() {
+    AVCodecParameters *codecpar = formatContext_->streams[audioStreamIndex_]->codecpar;
+    audioCodec_ = avcodec_find_decoder(codecpar->codec_id);
+    if (!audioCodec_) return false;
+    audioCodecContext_ = avcodec_alloc_context3(audioCodec_);
+    if (!audioCodecContext_ || avcodec_parameters_to_context(audioCodecContext_, codecpar) < 0) return false;
+    if (avcodec_open2(audioCodecContext_, audioCodec_, nullptr) < 0) return false;
+    
+     // Setup SwrContext for resampling
+    swr_alloc_set_opts2(&swrContext_, &out_ch_layout, AV_SAMPLE_FMT_S16, 48000,
+                        &audioCodecContext_->ch_layout, audioCodecContext_->sample_fmt, audioCodecContext_->sample_rate, 0,
+                        nullptr);
+    swr_init(swrContext_);
+
+    audioBufferSize_ = av_samples_get_buffer_size(nullptr, 2, 4096, AV_SAMPLE_FMT_S16, 1);
+    audioBuffer_ = (uint8_t *)av_malloc(audioBufferSize_);
+    buffer = (uint8_t *)av_malloc(audioBufferSize_);
+
+    // Setup Audio Renderer
+    OH_AudioStreamBuilder *builder;
+    OH_AudioStream_Result result;
+    // 设置renderer信息
+    OH_AudioStreamBuilder_Create(&builder, AUDIOSTREAM_TYPE_RENDERER);
+    OH_AudioStreamBuilder_SetSamplingRate(builder, 48000);                     // 设置采样率
+    OH_AudioStreamBuilder_SetChannelCount(builder, 2);
+    // OH_AudioStreamBuilder_SetChannelLayout(builder, CH_LAYOUT_STEREO);
+    OH_AudioStreamBuilder_SetSampleFormat(builder, AUDIOSTREAM_SAMPLE_S16LE);  // 设置采样格式
+    OH_AudioStreamBuilder_SetEncodingType(builder, AUDIOSTREAM_ENCODING_TYPE_RAW);
+
+    OH_AudioStreamBuilder_SetRendererInfo(builder, AUDIOSTREAM_USAGE_MOVIE);
+    
+    OH_AudioStreamBuilder_SetFrameSizeInCallback(builder, audioBufferSize_);
+    // 设置回调函数
+    OH_AudioRenderer_Callbacks callbacks;
+    callbacks.OH_AudioRenderer_OnError = error_callback;
+    callbacks.OH_AudioRenderer_OnInterruptEvent = nullptr;
+    callbacks.OH_AudioRenderer_OnStreamEvent = nullptr;
+
+    OH_AudioStreamBuilder_SetRendererCallback(builder, callbacks, nullptr);
+    OH_AudioRenderer_OnWriteDataCallback writeDataCb = write_callback;
+    OH_AudioStreamBuilder_SetRendererWriteDataCallback(builder, writeDataCb, nullptr);
+
+    OH_AudioStreamBuilder_GenerateRenderer(builder, &audioRenderer_);
+
+    OH_AudioStreamBuilder_Destroy(builder);
+
+   
+    return true;
+}
+
+
+
+// Process a single video frame.
+bool VideoStreamHandler::processVideoFrame(AVFrame *frame) {
+    if (!frame->data[0]) return false;
+    VideoFrame videoFrame;
+    videoFrame.width = frameWidth_;
+    videoFrame.height = frameHeight_;
+    videoFrame.pts = frame->pts;
+    videoFrame.data[0] = frame->data[0];
+    videoFrame.data[1] = frame->data[1];
+    videoFrame.data[2] = frame->data[2];
+    videoFrame.linesize[0] = frame->linesize[0];
+    videoFrame.linesize[1] = frame->linesize[1];
+    videoFrame.linesize[2] = frame->linesize[2];
+    std::lock_guard<std::mutex> lock(callbackMutex_);
+    if (frameCallback_) {
+        frameCallback_(videoFrame);
+    }
+    return true;
+}
+
+// Process a single audio frame.
+bool VideoStreamHandler::processAudioFrame(AVFrame *frame) {
+    // 将音频数据转换为设备可以播放的格式
+    // OH_LOG_INFO(LOG_APP, "received audio frame");
+    int out_samples = swr_convert(swrContext_, &audioBuffer_, audioBufferSize_,
+                                (const uint8_t **)frame->data, frame->nb_samples);
+    
+    if (out_samples > 0) {
+        int buffer_size = av_samples_get_buffer_size(nullptr, 2, out_samples, AV_SAMPLE_FMT_S16, 1);
+        // todo 输入要播放的音频数据
+        write_callback(audioRenderer_, audioBuffer_, buffer, audioBufferSize_);
+//        OH_AudioRenderer_Write(audioRenderer_, audioBuffer_, buffer_size);
+//        OH_AudioRenderer_OnWriteDataCallback(audioRenderer_, audioBuffer_, )
+    }
+    return true;
+}
+
+// Clean up all resources.
+void VideoStreamHandler::cleanup() {
+    if (packet_) av_packet_free(&packet_);
+    if (frame_) av_frame_free(&frame_);
+    if (videoCodecContext_) avcodec_free_context(&videoCodecContext_);
+    if (audioCodecContext_) avcodec_free_context(&audioCodecContext_);
+    if (formatContext_) avformat_close_input(&formatContext_);
+    if (swrContext_) swr_free(&swrContext_);
+    if (audioBuffer_) av_freep(&audioBuffer_);
+    if (audioRenderer_) {
+        OH_AudioRenderer_Stop(audioRenderer_);
+        OH_AudioRenderer_Release(audioRenderer_);
+        audioRenderer_ = nullptr;
+    }
+    videoStreamIndex_ = -1;
+    audioStreamIndex_ = -1;
+    packet_ = nullptr;
+    frame_ = nullptr;
+    videoCodecContext_ = nullptr;
+    audioCodecContext_ = nullptr;
+    formatContext_ = nullptr;
+    swrContext_ = nullptr;
+    audioBuffer_ = nullptr;
+}
