@@ -72,8 +72,6 @@ void VideoStreamHandler::stopStream() {
     if (streamThread_.joinable()) {
         streamThread_.join();
     }
-
-    cleanup();
     isStreaming_ = false;
 }
 
@@ -113,7 +111,7 @@ void VideoStreamHandler::streamThread() {
 
     OH_LOG_INFO(LOG_APP, "Decoder setup successfully");
     isStreaming_ = true;
-    
+
     // 分配帧内存
     frame_ = av_frame_alloc();
     packet_ = av_packet_alloc();
@@ -150,7 +148,7 @@ void VideoStreamHandler::streamThread() {
         } else {
             // 读取失败，可能是流结束或网络错误
             if (ret == AVERROR_EOF) {
-                OH_LOG_INFO(LOG_APP, "End of stream reached");
+                OH_LOG_WARN(LOG_APP, "End of stream reached");
                 break;
             } else {
                 char error_str[AV_ERROR_MAX_STRING_SIZE];
@@ -265,6 +263,7 @@ bool VideoStreamHandler::setupDecoder() {
     codecContext_ = avcodec_alloc_context3(codec_);
     if (!codecContext_) {
         OH_LOG_ERROR(LOG_APP, "Failed to allocate codec context");
+        avcodec_free_context(&codecContext_);
         return false;
     }
 
