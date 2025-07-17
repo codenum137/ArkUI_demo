@@ -13,6 +13,7 @@ namespace VideoStreamNS {
 VideoRenderer::VideoRenderer(int64_t surfaceId) {
     this->surfaceId_ = surfaceId;
     this->eglCore_ = new EGLCore();
+    this->audioRender_ = new AudioRender();
     isInitialized_ = false;
 }
 
@@ -21,12 +22,19 @@ bool VideoRenderer::RenderYUVFrame(const VideoFrame &frame) {
         OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "VideoRenderer", "RenderYUVFrame: not initialized");
         return false;
     }
-
     return eglCore_->RenderYUVFrame(frame);
 }
 
+
+bool VideoRenderer::RenderAudioFrame(void * audioBuffer, int32_t bufferLen){
+    if (!isInitialized_ || audioRender_ == nullptr) {
+        OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "AudioRenderer", "RenderAudioFrame: not initialized");
+        return false;
+    }
+    return audioRender_->renderAudioFrame(audioBuffer, bufferLen);
+}
 void VideoRenderer::InitNativeWindow(OHNativeWindow *window) {
-    if (eglCore_->EglContextInit(window)) {
+    if (eglCore_->EglContextInit(window) && audioRender_->renderInit()) {
         isInitialized_ = true;
         OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "VideoRenderer", "InitNativeWindow success");
     } else {

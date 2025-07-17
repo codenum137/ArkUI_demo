@@ -30,6 +30,7 @@ include_directories(${NATIVERENDER_ROOT_PATH}
 add_library(entry SHARED
     render/egl_core.cpp
     render/plugin_render.cpp
+    render/audio_render.cpp
     manager/plugin_manager.cpp
     video_stream_handler.cpp
     napi_init.cpp

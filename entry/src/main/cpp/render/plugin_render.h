@@ -9,10 +9,12 @@
 
 #include "../video_stream_handler.h"
 #include "egl_core.h"
+#include "audio_render.h"
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <native_window/external_window.h>
 
 namespace VideoStreamNS {
+
 class VideoRenderer {
 public:
     explicit VideoRenderer(int64_t surfaceId);
@@ -22,15 +24,22 @@ public:
             delete eglCore_;
             eglCore_ = nullptr;
         }
+        if(audioRender_ != nullptr){
+            audioRender_->AudioRendererRelease();
+            delete audioRender_;
+            audioRender_ = nullptr;
+        }
     }
 
     bool RenderYUVFrame(const VideoFrame &frame);
+    bool RenderAudioFrame(void * audioBuffer, int32_t bufferLen);
     bool IsInitialized() const;
     void InitNativeWindow(OHNativeWindow *window);
     void UpdateSize(int width, int height);
 
 private:
     EGLCore *eglCore_;
+    VideoStreamNS::AudioRender *audioRender_;
     int64_t surfaceId_;
     bool isInitialized_;
 };

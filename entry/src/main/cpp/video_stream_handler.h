@@ -1,8 +1,9 @@
 #ifndef VIDEO_STREAM_HANDLER_H
 #define VIDEO_STREAM_HANDLER_H
 
-#include "hilog/log.h"
+
 #include "libavutil/channel_layout.h"
+#include <cstdint>
 #include <ohaudio/native_audiostreambuilder.h>
 #include <ohaudio/native_audiorenderer.h>
 #include <atomic>
@@ -32,13 +33,14 @@ class VideoStreamHandler {
 public:
     using FrameCallback = std::function<void(const VideoFrame &)>;
     using ErrorCallback = std::function<void(const std::string &)>;
-    using AudioCallback = std::function<OH_AudioData_Callback_Result(OH_AudioRenderer *, void *, void *, int32_t)>;
+    using AudioCallback = std::function<void(void*, int32_t)>;
 
     VideoStreamHandler();
     ~VideoStreamHandler();
 
     void setFrameCallback(FrameCallback callback);
     void setErrorCallback(ErrorCallback callback);
+    void setAudioCallback(AudioCallback callback);
 
     bool startStream(const std::string &url);
     void stopStream();
@@ -70,7 +72,7 @@ private:
 
     // FFmpeg - Audio
     AVCodecContext *audioCodecContext_;
-    const AVChannelLayout out_ch_layout = AV_CHANNEL_LAYOUT_2_2;
+    const AVChannelLayout out_ch_layout = AV_CHANNEL_LAYOUT_STEREO;
     const AVCodec *audioCodec_;
     SwrContext *swrContext_;
     int audioStreamIndex_;
@@ -91,15 +93,10 @@ private:
     FrameCallback frameCallback_;
     ErrorCallback errorCallback_;
     AudioCallback audioCallback_;
-     static OH_AudioData_Callback_Result write_callback(OH_AudioRenderer *render, void* userData, void *buffer, int32_t bufferLen){
-        memcpy(buffer, userData, bufferLen);
-        return AUDIO_DATA_CALLBACK_RESULT_VALID;
-    }
-    static int32_t error_callback(OH_AudioRenderer* renderer, void* userData, OH_AudioStream_Result error){
-    // 根据error表示的音频异常信息，做出相应的处理
-    OH_LOG_ERROR(LOG_APP, "Audio process error : %d ", error);
-    return 0;
-    }
+    
+    
+    
+    
 
     // Stream Info
     std::string streamUrl_;

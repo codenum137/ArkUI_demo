@@ -18,6 +18,8 @@
 // 全局视频流处理器映射
 static std::map<std::string, std::shared_ptr<VideoStreamHandler>> g_streamHandlers;
 
+
+
 // 开始视频流
 static napi_value StartVideoStream(napi_env env, napi_callback_info info) {
     OH_LOG_INFO(LOG_APP, "=== StartVideoStream called ===");
@@ -75,7 +77,14 @@ static napi_value StartVideoStream(napi_env env, napi_callback_info info) {
 
     handler->setErrorCallback(
         [](const std::string &error) { OH_LOG_ERROR(LOG_APP, "Stream error: %{public}s", error.c_str()); });
-
+    
+    handler->setAudioCallback([videoRenderer](void* audioBuffer, int32_t audioBufferLen){
+        OH_LOG_INFO(LOG_APP, "Audio received, len: %{public}d ", audioBufferLen);
+        if(!videoRenderer->RenderAudioFrame(audioBuffer, audioBufferLen)){
+            OH_LOG_ERROR(LOG_APP, "Failed to render audio frame");
+        }
+    });
+    
     OH_LOG_INFO(LOG_APP, "Callbacks set, starting stream...");
 
     // 开始流

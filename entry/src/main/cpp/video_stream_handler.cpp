@@ -3,7 +3,7 @@
 #include <chrono>
 #include <cstddef>
 #include <thread>
-
+#include "hilog/log.h"
 #undef LOG_DOMAIN
 #undef LOG_TAG
 #define LOG_DOMAIN 0x3200
@@ -39,7 +39,10 @@ void VideoStreamHandler::setErrorCallback(ErrorCallback callback) {
     errorCallback_ = callback;
 }
 
-
+void VideoStreamHandler::setAudioCallback(AudioCallback callback){
+    std::lock_guard<std::mutex> lock(callbackMutex_);
+    audioCallback_ = callback;
+}
 
 // Start the stream processing in a new thread.
 bool VideoStreamHandler::startStream(const std::string &url) {
@@ -131,6 +134,7 @@ void VideoStreamHandler::streamThread() {
             } else if (packet_->stream_index == audioStreamIndex_) {
                 if (avcodec_send_packet(audioCodecContext_, packet_) >= 0) {
                     while (avcodec_receive_frame(audioCodecContext_, frame_) >= 0) {
+                        OH_LOG_INFO(LOG_APP, "Audio frame sample format: %{public}d", frame_->format);
                         processAudioFrame(frame_);
                     }
                 }
@@ -206,6 +210,26 @@ static OH_AudioData_Callback_Result NewAudioRendererOnWriteData(
     return AUDIO_DATA_CALLBACK_RESULT_VALID;
 }
 
+//OH_AudioData_Callback_Result write_callback(OH_AudioRenderer *render, void* userData, void* audioData, int32_t audioDataSize){
+//    OH_LOG_INFO(LOG_APP, "On audio data write");
+//    memcpy(audioData, buffer, audioDataSize);
+//    return AUDIO_DATA_CALLBACK_RESULT_VALID;
+//}
+//int32_t error_callback(OH_AudioRenderer* renderer, void* userData, OH_AudioStream_Result error){
+//    // 根据error表示的音频异常信息，做出相应的处理
+//    OH_LOG_ERROR(LOG_APP, "Audio process error : %{public}d ", error);
+//    return 0;
+//}
+//    
+//int32_t streamEvent_callback(OH_AudioRenderer* renderer, void* userData,OH_AudioStream_Event event){
+//    OH_LOG_INFO(LOG_APP, "On audio stream event");
+//    return 0;
+//}
+//int32_t interruptEvent_callback(OH_AudioRenderer* renderer, void* userData, OH_AudioInterrupt_ForceType type, OH_AudioInterrupt_Hint hint){
+//    OH_LOG_INFO(LOG_APP, "On audio interrupt event");
+//    return 0;
+//}
+
 bool VideoStreamHandler::setupAudioDecoder() {
     AVCodecParameters *codecpar = formatContext_->streams[audioStreamIndex_]->codecpar;
     audioCodec_ = avcodec_find_decoder(codecpar->codec_id);
@@ -222,35 +246,36 @@ bool VideoStreamHandler::setupAudioDecoder() {
 
     audioBufferSize_ = av_samples_get_buffer_size(nullptr, 2, 4096, AV_SAMPLE_FMT_S16, 1);
     audioBuffer_ = (uint8_t *)av_malloc(audioBufferSize_);
-    buffer = (uint8_t *)av_malloc(audioBufferSize_);
 
-    // Setup Audio Renderer
-    OH_AudioStreamBuilder *builder;
-    OH_AudioStream_Result result;
-    // 设置renderer信息
-    OH_AudioStreamBuilder_Create(&builder, AUDIOSTREAM_TYPE_RENDERER);
-    OH_AudioStreamBuilder_SetSamplingRate(builder, 48000);                     // 设置采样率
-    OH_AudioStreamBuilder_SetChannelCount(builder, 2);
-    // OH_AudioStreamBuilder_SetChannelLayout(builder, CH_LAYOUT_STEREO);
-    OH_AudioStreamBuilder_SetSampleFormat(builder, AUDIOSTREAM_SAMPLE_S16LE);  // 设置采样格式
-    OH_AudioStreamBuilder_SetEncodingType(builder, AUDIOSTREAM_ENCODING_TYPE_RAW);
-
-    OH_AudioStreamBuilder_SetRendererInfo(builder, AUDIOSTREAM_USAGE_MOVIE);
-    
-    OH_AudioStreamBuilder_SetFrameSizeInCallback(builder, audioBufferSize_);
-    // 设置回调函数
-    OH_AudioRenderer_Callbacks callbacks;
-    callbacks.OH_AudioRenderer_OnError = error_callback;
-    callbacks.OH_AudioRenderer_OnInterruptEvent = nullptr;
-    callbacks.OH_AudioRenderer_OnStreamEvent = nullptr;
-
-    OH_AudioStreamBuilder_SetRendererCallback(builder, callbacks, nullptr);
-    OH_AudioRenderer_OnWriteDataCallback writeDataCb = write_callback;
-    OH_AudioStreamBuilder_SetRendererWriteDataCallback(builder, writeDataCb, nullptr);
-
-    OH_AudioStreamBuilder_GenerateRenderer(builder, &audioRenderer_);
-
-    OH_AudioStreamBuilder_Destroy(builder);
+//    // Setup Audio Renderer
+//    OH_AudioStreamBuilder *builder;
+//    OH_AudioStream_Result result;
+//    // 设置renderer信息
+//    OH_AudioStreamBuilder_Create(&builder, AUDIOSTREAM_TYPE_RENDERER);
+//    OH_AudioStreamBuilder_SetSamplingRate(builder, 48000);                     // 设置采样率
+//    OH_AudioStreamBuilder_SetChannelCount(builder, 2);                         // 设置声道
+//    // OH_AudioStreamBuilder_SetChannelLayout(builder, CH_LAYOUT_STEREO);
+//    OH_AudioStreamBuilder_SetSampleFormat(builder, AUDIOSTREAM_SAMPLE_S16LE);  // 设置采样格式
+//    OH_AudioStreamBuilder_SetEncodingType(builder, AUDIOSTREAM_ENCODING_TYPE_RAW); // 设置音频流编码类型
+//
+//    OH_AudioStreamBuilder_SetRendererInfo(builder, AUDIOSTREAM_USAGE_MOVIE);  //设置使用场景
+//    
+//    OH_AudioStreamBuilder_SetFrameSizeInCallback(builder, audioBufferSize_);  
+//    // 设置回调函数
+//    OH_AudioRenderer_Callbacks callbacks;
+//    callbacks.OH_AudioRenderer_OnError = error_callback;
+//    callbacks.OH_AudioRenderer_OnInterruptEvent = interruptEvent_callback;
+//    callbacks.OH_AudioRenderer_OnStreamEvent = streamEvent_callback;
+//
+//    OH_AudioStreamBuilder_SetRendererCallback(builder, callbacks, nullptr);
+//    OH_AudioRenderer_OnWriteDataCallback writeDataCb = write_callback;
+//    OH_AudioStreamBuilder_SetRendererWriteDataCallback(builder, writeDataCb, nullptr);
+//
+//    OH_AudioStreamBuilder_GenerateRenderer(builder, &audioRenderer_);
+//    
+//    OH_AudioRenderer_Start(audioRenderer_);
+//
+//    OH_AudioStreamBuilder_Destroy(builder);
 
    
     return true;
@@ -286,9 +311,11 @@ bool VideoStreamHandler::processAudioFrame(AVFrame *frame) {
                                 (const uint8_t **)frame->data, frame->nb_samples);
     
     if (out_samples > 0) {
-        int buffer_size = av_samples_get_buffer_size(nullptr, 2, out_samples, AV_SAMPLE_FMT_S16, 1);
+        // int buffer_size = av_samples_get_buffer_size(nullptr, 2, out_samples, AV_SAMPLE_FMT_S16, 1);
         // todo 输入要播放的音频数据
-        write_callback(audioRenderer_, audioBuffer_, buffer, audioBufferSize_);
+        // OH_LOG_INFO(LOG_APP, "audio frame\n %{public}s", audioBuffer_);
+        audioCallback_(audioBuffer_, audioBufferSize_);
+        // write_callback(audioRenderer_, audioBuffer_, buffer, audioBufferSize_);
 //        OH_AudioRenderer_Write(audioRenderer_, audioBuffer_, buffer_size);
 //        OH_AudioRenderer_OnWriteDataCallback(audioRenderer_, audioBuffer_, )
     }
