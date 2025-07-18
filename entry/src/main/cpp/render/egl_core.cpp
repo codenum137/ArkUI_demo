@@ -815,60 +815,60 @@ void EGLCore::UpdateSize(int width, int height) {
     OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore", "UpdateSize: %{public}dx%{public}d", width_, height_);
 
     // 如果纹理已经初始化并且窗口尺寸有效，渲染测试帧
-//    if (texturesInitialized_ && width_ > 0 && height_ > 0) {
-//        VideoFrame testFrame;
-//        if (LoadYUVFromRawfile(testFrame)) {
-//            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
-//                         "Rendering test frame with padding after size update");
-//
-//            // 确保EGL上下文是当前的
-//            if (eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
-//                // 清除屏幕
-//                glViewport(DEFAULT_X_POSITION, DEFAULT_Y_POSITION, width_, height_);
-//                glClearColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色背景
-//                glClear(GL_COLOR_BUFFER_BIT);
-//
-//                // 更新纹理并渲染
-//                if (UpdateYUVTextures(testFrame)) {
-//                    glUseProgram(program_);
-//
-//                    // 绑定纹理
-//                    glActiveTexture(GL_TEXTURE0);
-//                    glBindTexture(GL_TEXTURE_2D, yTexture_);
-//                    glUniform1i(yTextureLocation_, 0);
-//
-//                    glActiveTexture(GL_TEXTURE1);
-//                    glBindTexture(GL_TEXTURE_2D, uTexture_);
-//                    glUniform1i(uTextureLocation_, 1);
-//
-//                    glActiveTexture(GL_TEXTURE2);
-//                    glBindTexture(GL_TEXTURE_2D, vTexture_);
-//                    glUniform1i(vTextureLocation_, 2);
-//
-//                    // 绘制
-//                    glBindVertexArray(VAO_);
-//                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-//                    glBindVertexArray(0);
-//
-//                    // 交换缓冲区显示
-//                    glFlush();
-//                    eglSwapBuffers(eglDisplay_, eglSurface_);
-//
-//                    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
-//                                 "Test YUV frame with padding displayed after UpdateSize");
-//                } else {
-//                    OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
-//                                 "Failed to update YUV textures in UpdateSize");
-//                }
-//            } else {
-//                OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
-//                             "Failed to make EGL context current in UpdateSize");
-//            }
-//        } else {
-//            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
-//                         "Failed to load test YUV frame in UpdateSize");
-       // }
-   // }
+    if (texturesInitialized_ && width_ > 0 && height_ > 0) {
+        VideoFrame testFrame;
+        if (LoadYUVFromRawfile(testFrame)) {
+            OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                         "Rendering test frame with padding after size update");
+
+            // 确保EGL上下文是当前的
+            if (eglMakeCurrent(eglDisplay_, eglSurface_, eglSurface_, eglContext_)) {
+                // 清除屏幕
+                glViewport(DEFAULT_X_POSITION, DEFAULT_Y_POSITION, width_, height_);
+                glClearColor(0.0f, 0.0f, 1.0f, 1.0f); // 蓝色背景
+                glClear(GL_COLOR_BUFFER_BIT);
+
+                // 更新纹理并渲染
+                if (UpdateYUVTextures(testFrame)) {
+                    glUseProgram(program_);
+
+                    // 绑定纹理
+                    glActiveTexture(GL_TEXTURE0);
+                    glBindTexture(GL_TEXTURE_2D, yTexture_);
+                    glUniform1i(yTextureLocation_, 0);
+
+                    glActiveTexture(GL_TEXTURE1);
+                    glBindTexture(GL_TEXTURE_2D, uTexture_);
+                    glUniform1i(uTextureLocation_, 1);
+
+                    glActiveTexture(GL_TEXTURE2);
+                    glBindTexture(GL_TEXTURE_2D, vTexture_);
+                    glUniform1i(vTextureLocation_, 2);
+
+                    // 绘制
+                    glBindVertexArray(VAO_);
+                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+                    glBindVertexArray(0);
+
+                    // 交换缓冲区显示
+                    glFlush();
+                    eglSwapBuffers(eglDisplay_, eglSurface_);
+
+                    OH_LOG_Print(LOG_APP, LOG_INFO, LOG_PRINT_DOMAIN, "EGLCore",
+                                 "Test YUV frame with padding displayed after UpdateSize");
+                } else {
+                    OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
+                                 "Failed to update YUV textures in UpdateSize");
+                }
+            } else {
+                OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
+                             "Failed to make EGL context current in UpdateSize");
+            }
+        } else {
+            OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_PRINT_DOMAIN, "EGLCore",
+                         "Failed to load test YUV frame in UpdateSize");
+        }
+    }
 }
 
 void EGLCore::Release() {

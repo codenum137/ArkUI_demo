@@ -131,7 +131,8 @@ void VideoStreamHandler::streamThread() {
                         frameCount_++;
                     }
                 }
-            } else if (packet_->stream_index == audioStreamIndex_) {
+            } 
+            else if (packet_->stream_index == audioStreamIndex_) {
                 if (avcodec_send_packet(audioCodecContext_, packet_) >= 0) {
                     while (avcodec_receive_frame(audioCodecContext_, frame_) >= 0) {
                         OH_LOG_INFO(LOG_APP, "Audio frame sample format: %{public}d", frame_->format);
@@ -244,7 +245,7 @@ bool VideoStreamHandler::setupAudioDecoder() {
                         nullptr);
     swr_init(swrContext_);
 
-    audioBufferSize_ = av_samples_get_buffer_size(nullptr, 2, 4096, AV_SAMPLE_FMT_S16, 1);
+    audioBufferSize_ = 4096;         //av_samples_get_buffer_size(nullptr, 2, 4096, AV_SAMPLE_FMT_S16, 1);
     audioBuffer_ = (uint8_t *)av_malloc(audioBufferSize_);
 
 //    // Setup Audio Renderer
