@@ -22,19 +22,19 @@
 namespace VideoStreamNS{
 
 OH_AudioData_Callback_Result write_callback(OH_AudioRenderer *render, void* userData, void* audioData, int32_t audioDataSize);
-extern uint8_t * Buffer;
 
 class AudioRender {
 public:
     explicit AudioRender(): audioRenderer_(nullptr), builder(nullptr){
         audioBufferSize_ = av_samples_get_buffer_size(nullptr, 2, 4096, AV_SAMPLE_FMT_S16, 1);
-        Buffer = (uint8_t *)av_malloc(audioBufferSize_);
+//        Buffer = (uint8_t *)av_malloc(audioBufferSize_);
     };
     bool renderInit();
     bool renderAudioFrame(void* audioBuffer, int32_t bufferLen);
     void AudioRendererRelease();
     
     bool renderStart();
+    OH_AudioData_Callback_Result handleWriteData(uint8_t* audioData, int32_t audioDataSize);
 private:
     OH_AudioRenderer* audioRenderer_;
     OH_AudioStreamBuilder* builder;

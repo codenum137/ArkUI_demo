@@ -6,16 +6,18 @@
 
 #include "audio_render.h"
 #include "hilog/log.h"
+#include <cstdint>
 //#include "render/plugin_render.h"
 
 namespace VideoStreamNS{
 OH_AudioData_Callback_Result write_callback(OH_AudioRenderer *render, void* userData, void* audioData, int32_t audioDataSize){
     OH_LOG_INFO(LOG_APP, "On audio data write");
-    if(Buffer == nullptr){
+    AudioRender* audioRender = static_cast<AudioRender*>(userData);
+    if(audioRender == nullptr){
         return AUDIO_DATA_CALLBACK_RESULT_INVALID;
     }
-    memcpy(audioData, Buffer, audioDataSize);
-    return AUDIO_DATA_CALLBACK_RESULT_VALID;
+    
+    return audioRender->handleWriteData(static_cast<uint8_t*>(audioData),audioDataSize);
 }
 int32_t error_callback(OH_AudioRenderer* renderer, void* userData, OH_AudioStream_Result error){
     // 根据error表示的音频异常信息，做出相应的处理
@@ -40,7 +42,7 @@ bool AudioRender::renderInit(){
     OH_AudioStreamBuilder_Create(&builder, AUDIOSTREAM_TYPE_RENDERER);
     OH_AudioStreamBuilder_SetSamplingRate(builder, 48000);                     // 设置采样率
     OH_AudioStreamBuilder_SetChannelCount(builder, 2);                         // 设置声道
-    // OH_AudioStreamBuilder_SetChannelLayout(builder, CH_LAYOUT_STEREO);
+    OH_AudioStreamBuilder_SetChannelLayout(builder, CH_LAYOUT_STEREO);
     OH_AudioStreamBuilder_SetSampleFormat(builder, AUDIOSTREAM_SAMPLE_S16LE);  // 设置采样格式
     OH_AudioStreamBuilder_SetEncodingType(builder, AUDIOSTREAM_ENCODING_TYPE_RAW); // 设置音频流编码类型
 
@@ -53,7 +55,7 @@ bool AudioRender::renderInit(){
     callbacks.OH_AudioRenderer_OnInterruptEvent = interruptEvent_callback;
     callbacks.OH_AudioRenderer_OnStreamEvent = streamEvent_callback;
 
-    OH_AudioStreamBuilder_SetRendererCallback(builder, callbacks, nullptr);
+    OH_AudioStreamBuilder_SetRendererCallback(builder, callbacks, this);
     OH_AudioRenderer_OnWriteDataCallback writeDataCb = write_callback;
     OH_AudioStreamBuilder_SetRendererWriteDataCallback(builder, writeDataCb, this);
 
@@ -64,17 +66,42 @@ bool AudioRender::renderInit(){
     }
     // OH_AudioRenderer_Start(audioRenderer_);
 
-    // OH_AudioStreamBuilder_Destroy(builder);
+    OH_AudioStreamBuilder_Destroy(builder);
     return true;
 }
 
 // todo 将传入的帧放入Buffer, 供回调函数使用
 bool AudioRender::renderAudioFrame(void* audioBuffer, int32_t bufferLen){
     OH_LOG_INFO(LOG_APP, "Render audio frame, len: %d", bufferLen);
-    memcpy(Buffer, audioBuffer, bufferLen);
+    std::vector<uint8_t> buffer(bufferLen);
+    memcpy(buffer.data(), audioBuffer, bufferLen);
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        dataQueue_.push(std::move(buffer));
+    }
+    queueCond_.notify_one();
     return true;
 }
 
+OH_AudioData_Callback_Result AudioRender::handleWriteData(uint8_t* audioData, int32_t audioDataSize) {
+    std::unique_lock<std::mutex> lock(queueMutex_);
+    if (dataQueue_.empty()) {
+        OH_LOG_WARN(LOG_APP, "Audio data queue is empty, writing silence.");
+        memset(audioData, 0, audioDataSize); // 写入静音以避免杂音
+        return AUDIO_DATA_CALLBACK_RESULT_VALID;
+    }
+    std::vector<uint8_t> buffer = dataQueue_.front();
+    dataQueue_.pop();
+    lock.unlock();
+    
+    if (buffer.size() != audioDataSize){
+         OH_LOG_WARN(LOG_APP, "Buffer size mismatch. Frame size: %{public}zu, Required size:%{public}d", buffer.size(), audioDataSize);
+    }
+    
+    memcpy(audioData, buffer.data(), std::min((size_t)audioDataSize, buffer.size()));
+    
+    return AUDIO_DATA_CALLBACK_RESULT_VALID;
+}
 bool AudioRender::renderStart(){
     OH_AudioStream_Result result = OH_AudioRenderer_Start(audioRenderer_);
     if(result){
@@ -87,7 +114,7 @@ bool AudioRender::renderStart(){
 void AudioRender::AudioRendererRelease() {
     if (audioRenderer_) {
         OH_AudioRenderer_Release(audioRenderer_);
-        OH_AudioStreamBuilder_Destroy(builder);
+        // OH_AudioStreamBuilder_Destroy(builder);
         audioRenderer_ = nullptr;
         builder = nullptr;
     }
