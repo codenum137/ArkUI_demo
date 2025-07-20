@@ -85,7 +85,8 @@ private:
     double frameRate_;
 
     // 帧统计
-    std::atomic<int> frameCount_;
+    time_t startTime_;
+    std::atomic<long> frameCount_;
     std::atomic<double> currentFrameRate_;
 };
 

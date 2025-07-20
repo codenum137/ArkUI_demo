@@ -49,9 +49,9 @@ class MyXComponentController extends XComponentController{
 @Entry
 @Component
 struct Index {
-  @State streamUrl: string = 'rtsp://10.129.177.159:8554/mystream'; //hey
-  // @State streamUrl: string = 'rtsp://10.29.237.55:8554/stream';
-  // @State streamUrl: string ='rtsp://77.110.228.219/axis-media/media.amp';
+  // @State streamUrl: string = 'rtsp://10.129.177.159:8554/mystream'; //hey
+  @State streamUrl: string = 'rtsp://10.29.237.55:8554/live';
+  // @State streamUrl: string ='rtsp://localhost:8554/live';
   @State isStreaming: boolean = false;
   @State streamInfo: string = 'No stream';
   @State frameCount: number = 0;
@@ -192,7 +192,7 @@ struct Index {
         // 启动成功，但需要等待实际连接建立
         this.stateTransitionTimer = setTimeout(() => {
           this.transitionToState(StreamState.RUNNING, '流启动成功');
-        }, 2000);
+        }, 5000);
       } else {
         this.transitionToState(StreamState.ERROR, '启动流失败');
       }
@@ -488,43 +488,43 @@ struct Index {
               .borderRadius(8)
 
             // 播放状态指示 - 移到视频下方
-            // Row() {
-            //   if (this.isStreaming) {
-            //     Text('🔴 LIVE')
-            //       .fontSize(14)
-            //       .fontColor('#ef4444')
-            //       .fontWeight(FontWeight.Bold)
-            //
-            //     Text(`帧数: ${this.frameCount}`)
-            //       .fontSize(12)
-            //       .fontColor('#6b7280')
-            //       .margin({ left: 15 })
-            //
-            //     Text(`帧率: ${this.frameRate.toFixed(1)} fps`)
-            //       .fontSize(12)
-            //       .fontColor('#6b7280')
-            //       .margin({ left: 10 })
-            //   } else {
-            //     Text('⏸️ 未播放')
-            //       .fontSize(14)
-            //       .fontColor('#9ca3af')
-            //   }
-            // }
-            // .width('100%')
-            // .justifyContent(FlexAlign.Start)
-            // .alignItems(VerticalAlign.Center)
-            // .margin({ top: 8 })
+            Row() {
+              if (this.isStreaming) {
+                Text('🔴 LIVE')
+                  .fontSize(14)
+                  .fontColor('#ef4444')
+                  .fontWeight(FontWeight.Bold)
+
+                Text(`帧数: ${this.frameCount}`)
+                  .fontSize(12)
+                  .fontColor('#6b7280')
+                  .margin({ left: 15 })
+
+                Text(`帧率: ${this.frameRate.toFixed(1)} fps`)
+                  .fontSize(12)
+                  .fontColor('#6b7280')
+                  .margin({ left: 10 })
+              } else {
+                Text('⏸️ 未播放')
+                  .fontSize(14)
+                  .fontColor('#9ca3af')
+              }
+            }
+            .width('100%')
+            .justifyContent(FlexAlign.Start)
+            .alignItems(VerticalAlign.Center)
+            .margin({ top: 8 })
 
             // 流信息显示
-            // if (this.streamInfo && this.streamInfo !== 'No stream') {
-            //   Text(this.streamInfo)
-            //     .fontSize(11)
-            //     .fontColor('#9ca3af')
-            //     .margin({ top: 4 })
-            //     .maxLines(2)
-            //     .textOverflow({ overflow: TextOverflow.Ellipsis })
-            //     .width('100%')
-            // }
+            if (this.streamInfo && this.streamInfo !== 'No stream') {
+              Text(this.streamInfo)
+                .fontSize(11)
+                .fontColor('#9ca3af')
+                .margin({ top: 4 })
+                .maxLines(2)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .width('100%')
+            }
           }
           .width('100%')
           .padding(15)

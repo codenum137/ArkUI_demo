@@ -98,7 +98,8 @@ void VideoStreamHandler::streamThread() {
         }
         return;
     }
-
+    
+    time_t lastTime = time(nullptr);
     // 设置解码器
     if (!setupDecoder()) {
         OH_LOG_ERROR(LOG_APP, "Failed to setup decoder");
@@ -140,6 +141,9 @@ void VideoStreamHandler::streamThread() {
                         frameCount_++;
                         if (frameCount_ % 30 == 0) { // 每30帧输出一次日志
                             OH_LOG_INFO(LOG_APP, "Processed %{public}d frames", frameCount_.load());
+                            frameRate_ = 30 / (time(nullptr) - lastTime);
+                            currentFrameRate_ = frameRate_;
+                            lastTime = time(nullptr);
                         }
                     }
                 }
@@ -162,7 +166,7 @@ void VideoStreamHandler::streamThread() {
     OH_LOG_INFO(LOG_APP, "Main loop ended, processed %{public}d frames total", frameCount_.load());
 
     // 更新当前帧率
-    currentFrameRate_ = frameRate_;
+    // currentFrameRate_ = frameRate_;
 
     cleanup();
     // isStreaming_ = false;
@@ -375,4 +379,5 @@ void VideoStreamHandler::cleanup() {
 
 int VideoStreamHandler::getFrameCount() const { return frameCount_.load(); }
 
-double VideoStreamHandler::getCurrentFrameRate() const { return currentFrameRate_.load(); }
+double VideoStreamHandler::getCurrentFrameRate() const {
+    return currentFrameRate_.load() ; }
